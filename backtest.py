@@ -9,6 +9,8 @@ them in would let the system retrieve the answer key and report an accuracy that
 """
 import argparse
 import random
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -117,11 +119,22 @@ def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
     indexed = index(client, corpus)
     chat = default_chat_client() if use_model else None
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(lambda ruling: score(ruling, classify(ruling.description, client=client, chat=chat)), held_out))
-
+    # Results are written as they land, and progress is printed, because the free tier's token
+    # budget makes this a multi-hour run: a crash at case 400 must not throw away 400 classifications,
+    # and a run with no output is indistinguishable from a hung one.
     RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_FILE.write_text("\n".join(result.model_dump_json() for result in results) + "\n", encoding="utf-8")
+    results: list[CaseResult] = []
+    started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=workers) as pool, RESULTS_FILE.open("w", encoding="utf-8") as handle:
+        for result in pool.map(lambda ruling: score(ruling, classify(ruling.description, client=client, chat=chat)), held_out):
+            results.append(result)
+            handle.write(result.model_dump_json() + "\n")
+            handle.flush()
+            done = len(results)
+            if done % 10 == 0 or done == len(held_out):
+                rate = done / max(time.monotonic() - started, 1e-9)
+                correct = sum(item.correct_hs6 for item in results)
+                print(f"  {done}/{len(held_out)} | HS6 {correct / done:.1%} | {rate * 60:.1f}/min | ~{(len(held_out) - done) / max(rate, 1e-9) / 60:.0f} min left", file=sys.stderr, flush=True)
 
     answered = [result for result in results if result.disposition == "answered"]
     escalated = [result for result in results if result.disposition == "escalated"]
