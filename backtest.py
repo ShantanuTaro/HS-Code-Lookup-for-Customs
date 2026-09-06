@@ -15,7 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 
-from classify import ANSWER_CONFIDENCE_THRESHOLD, Classification, classify, default_chat_client
+from classify import ANSWER_CONFIDENCE_THRESHOLD, BASELINE_MARKER, Classification, classify, default_chat_client
 from cross import Ruling, load_rulings
 from retrieve import index
 
@@ -36,6 +36,7 @@ class CaseResult(BaseModel):
     citations: list[str]
     correct_hs6: bool
     correct_hs4: bool
+    from_baseline: bool
     retrieved_hs6: list[str]
 
 
@@ -46,6 +47,7 @@ class Report(BaseModel):
     indexed: int
     cases: int
     model: str
+    fell_back_to_baseline: int
     accuracy_hs6: float
     accuracy_hs4: float
     retrieval_recall_at_k: float
@@ -77,6 +79,7 @@ def score(ruling: Ruling, result: Classification) -> CaseResult:
         reason=result.reason,
         citations=result.citations,
         correct_hs6=result.hs6 in expected_hs6,
+        from_baseline=result.reasoning.startswith(BASELINE_MARKER),
         correct_hs4=bool(result.hs6) and result.hs6[:4] in {code[:4] for code in expected_hs6},
         retrieved_hs6=[hit.hs6 for hit in result.candidates],
     )
@@ -126,7 +129,8 @@ def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
         corpus_size=len(rulings),
         indexed=indexed,
         cases=len(results),
-        model="groq" if chat else "retrieval-baseline",
+        model=(chat.model if chat else "retrieval-baseline"),
+        fell_back_to_baseline=sum(result.from_baseline for result in results),
         accuracy_hs6=sum(result.correct_hs6 for result in results) / len(results),
         accuracy_hs4=sum(result.correct_hs4 for result in results) / len(results),
         retrieval_recall_at_k=sum(result.expected_hs6 in result.retrieved_hs6 for result in results) / len(results),

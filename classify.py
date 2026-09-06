@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Literal, Protocol
@@ -25,8 +26,16 @@ load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 # taste: raising it trades coverage for precision, and both numbers are printed by the backtest.
 ANSWER_CONFIDENCE_THRESHOLD = 0.90
 RETRIEVAL_TOP_K = 8
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 CACHE_FILE = Path(__file__).resolve().parent / "data" / "llm_cache.jsonl"
+# The free tier's per-minute token budget is the binding constraint on a 500-case backtest, so a
+# 429 is an expected part of a normal run rather than a failure. Waiting is correct; falling back
+# to the baseline here would quietly turn a rate limit into a worse accuracy number.
+RATE_LIMIT_RETRIES = 6
+# Marks a result the retrieval baseline produced. The fallback is deliberate in production but
+# must never be invisible: a backtest that silently scores the baseline while reporting the model
+# is a measurement of nothing, which is exactly how the first run of this backtest lied.
+BASELINE_MARKER = "Retrieval baseline"
 
 SYSTEM_PROMPT = """You are a US customs classification specialist. Classify the merchandise into a \
 6-digit HS subheading using ONLY the CBP rulings provided as precedent.
@@ -85,17 +94,21 @@ class GroqChatClient:
         key = hashlib.sha256(f"{self.model}\n{system}\n{user}".encode("utf-8")).hexdigest()
         if key in self.cache:
             return self.cache[key]
-        response = httpx.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "temperature": 0.0,
-                "response_format": {"type": "json_object"},
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            },
-            timeout=90.0,
-        )
+        for attempt in range(RATE_LIMIT_RETRIES):
+            response = httpx.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": self.model,
+                    "temperature": 0.0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                },
+                timeout=90.0,
+            )
+            if response.status_code != 429:
+                break
+            time.sleep(float(response.headers.get("retry-after") or 0) or min(2 ** attempt, 30))
         response.raise_for_status()
         payload = json.loads(response.json()["choices"][0]["message"]["content"])
         if not isinstance(payload, dict):
@@ -128,14 +141,14 @@ def baseline(hits: list[Hit]) -> Classification:
     than silently substituted: `reasoning` names it, and its confidence is the vote share.
     """
     if not hits:
-        return Classification(hs6=None, reasoning="No CROSS ruling matched this merchandise.", citations=[], confidence=0.0, disposition="escalated", reason="Retrieval returned no candidate rulings.", candidates=[])
+        return Classification(hs6=None, reasoning=f"{BASELINE_MARKER}: no CROSS ruling matched this merchandise.", citations=[], confidence=0.0, disposition="escalated", reason="Retrieval returned no candidate rulings.", candidates=[])
     votes = Counter(hit.hs6 for hit in hits)
     hs6, count = votes.most_common(1)[0]
     confidence = count / len(hits)
     return gate(
         Classification(
             hs6=hs6,
-            reasoning=f"Retrieval baseline (no model configured): {count} of {len(hits)} nearest CROSS rulings classify comparable merchandise under {hs6}.",
+            reasoning=f"{BASELINE_MARKER}: {count} of {len(hits)} nearest CROSS rulings classify comparable merchandise under {hs6}.",
             citations=[hit.ruling_number for hit in hits if hit.hs6 == hs6],
             confidence=confidence,
             disposition="escalated",
