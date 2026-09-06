@@ -35,7 +35,7 @@ measured accuracy rather than taste.
 | `retrieve.py`  | Hybrid dense+sparse retrieval over the corpus, RRF-fused and reranked       |
 | `classify.py`  | Classify against retrieved rulings, then apply the gate                     |
 | `backtest.py`  | Held-out accuracy and the threshold calibration sweep                       |
-| `app.py`       | Free single-lookup page and the JSON endpoint behind it                    |
+| `app.py`       | Lookup page, 24k indexable ruling pages, sitemap, JSON endpoint            |
 | `test_hs.py`   | Leakage, gate, retrieval and split checks                                   |
 
 ### Label leakage
@@ -58,6 +58,18 @@ cp .env.example .env          # add GROQ_API_KEY
 
 .venv/bin/uvicorn app:app --port 8099   # the free lookup page
 ```
+
+## The SEO surface
+
+The lookup page is one URL competing against Flexport and Avalara. The corpus is 23,929 URLs
+competing against nothing: `/ruling/N352926` is a real page about a real product, titled with the
+long-tail phrase someone actually searches ("tariff classification of a hat, a headband and a
+blanket from China"). Each one links to the six rulings nearest it in retrieval space, so the corpus
+is a connected graph rather than 23,929 orphans, and each links into the lookup tool.
+
+`/sitemap.xml` lists every page; `robots.txt` points at it and keeps `/?q=` lookups out of the
+index, since a separate indexable page per query is how a tool becomes thin content. Set `BASE_URL`
+in the deployment or every canonical tag will claim the pages live on localhost.
 
 `backtest.py` prints ungated HS6/HS4 accuracy, retrieval recall@k (the ceiling on everything else),
 and a coverage-vs-precision table across candidate thresholds. Pick the lowest threshold whose

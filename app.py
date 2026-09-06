@@ -5,20 +5,29 @@ after JavaScript runs is not a page a crawler indexes or a broker can paste into
 lookup has a shareable `/?q=` URL that renders its own answer.
 """
 import html
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import Body, FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
 from classify import ANSWER_CONFIDENCE_THRESHOLD, Classification, classify, default_chat_client
 from cross import load_rulings
-from retrieve import index
+from retrieve import index, search
 
-TEMPLATE = Path(__file__).resolve().parent / "static" / "index.html"
+STATIC = Path(__file__).resolve().parent / "static"
+TEMPLATE = STATIC / "index.html"
+RULING_TEMPLATE = STATIC / "ruling.html"
 CROSS_URL = "https://rulings.cbp.gov/ruling/"
+# Absolute URLs are required in a sitemap and in a canonical tag, and getting them wrong is how a
+# site tells Google that 23,929 pages are really one page on localhost.
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8099").rstrip("/")
+RELATED_RULINGS = 6
 MINIMUM_QUERY_CHARACTERS = 12
 MAXIMUM_QUERY_CHARACTERS = 4000
 
@@ -35,11 +44,14 @@ async def lifespan(app: FastAPI):
     state["indexed"] = index(client, rulings)
     state["client"] = client
     state["chat"] = default_chat_client()
+    state["by_number"] = {ruling.ruling_number: ruling for ruling in rulings}
+    state["sitemap"] = build_sitemap(rulings)
     yield
     state.clear()
 
 
 app = FastAPI(title="HS classification", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 class LookupRequest(BaseModel):
@@ -72,7 +84,7 @@ def render_result(result: Classification) -> str:
     cited = set(result.citations)
     rulings = "".join(
         f"""<li class="{'cited' if hit.ruling_number in cited else ''}">
-          <a href="{CROSS_URL}{html.escape(hit.ruling_number)}" rel="nofollow noopener" target="_blank">{html.escape(hit.ruling_number)}</a>
+          <a href="/ruling/{html.escape(hit.ruling_number)}">{html.escape(hit.ruling_number)}</a>
           <span class="hs">{html.escape(hit.hs6)}</span>
           <span class="subject">{html.escape(hit.subject)}</span>
           <span class="date">{html.escape(hit.date)}</span>
@@ -90,8 +102,56 @@ def render_result(result: Classification) -> str:
 
 
 def render_page(query: str, body: str) -> str:
-    """Substitute the query and rendered result into the static template."""
-    return TEMPLATE.read_text(encoding="utf-8").replace("{{QUERY}}", html.escape(query, quote=True)).replace("<!--RESULT-->", body)
+    """Substitute the query and rendered result into the static template.
+
+    The canonical URL deliberately omits `q`: every distinct lookup would otherwise be a separate
+    indexable page saying roughly the same thing, which is how a useful tool turns into thin content.
+    """
+    return (
+        TEMPLATE.read_text(encoding="utf-8")
+        .replace("{{CANONICAL}}", f"{BASE_URL}/")
+        .replace("{{QUERY}}", html.escape(query, quote=True))
+        .replace("<!--RESULT-->", body)
+    )
+
+
+def build_sitemap(rulings: list) -> str:
+    """Render the corpus as one sitemap, which is what makes these pages discoverable at all."""
+    urls = "".join(
+        f"<url><loc>{BASE_URL}/ruling/{quote(ruling.ruling_number)}</loc><lastmod>{ruling.date}</lastmod></url>"
+        for ruling in rulings
+    )
+    return f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{BASE_URL}/</loc></url>{urls}</urlset>'
+
+
+def render_ruling(ruling) -> str:
+    """Render one ruling as an indexable page, linked to the rulings nearest it in the corpus.
+
+    The related list is the point as much as the ruling text is: 23,929 orphan pages are 23,929
+    pages nothing links to, and retrieval already knows which ones belong next to each other.
+    """
+    related = [hit for hit in search(ruling.description, top_k=RELATED_RULINGS + 1, client=state["client"]) if hit.ruling_number != ruling.ruling_number]
+    codes = "".join(
+        f'<li><span class="hs6">{html.escape(code[:6])}</span>{html.escape(code[6:])}</li>' for code in ruling.hts_codes
+    )
+    related_items = "".join(
+        f'<li><a href="/ruling/{html.escape(hit.ruling_number)}">{html.escape(hit.subject)}</a><span class="hs">{html.escape(hit.hs6)}</span></li>'
+        for hit in related[:RELATED_RULINGS]
+    )
+    summary = " ".join(ruling.description.split())[:155]
+    return (
+        RULING_TEMPLATE.read_text(encoding="utf-8")
+        .replace("{{TITLE}}", html.escape(f"{ruling.subject} — CBP ruling {ruling.ruling_number} (HS {ruling.hs6})"))
+        .replace("{{META}}", html.escape(f"HS {ruling.hs6}. {summary}", quote=True))
+        .replace("{{CANONICAL}}", f"{BASE_URL}/ruling/{quote(ruling.ruling_number)}")
+        .replace("{{SUBJECT}}", html.escape(ruling.subject))
+        .replace("{{CODES}}", codes)
+        .replace("{{DATE}}", html.escape(ruling.date))
+        .replace("{{DESCRIPTION}}", html.escape(ruling.description))
+        .replace("{{RELATED}}", related_items or "<li>No related rulings were found.</li>")
+        .replace("{{QUERY}}", quote(ruling.subject))
+        .replace("{{NUMBER}}", html.escape(ruling.ruling_number))
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -115,3 +175,24 @@ def api_classify(request: LookupRequest = Body(...)) -> Classification:
 def health() -> dict:
     """Report whether the corpus is loaded and whether a model is configured."""
     return {"indexed_rulings": state.get("indexed", 0), "model": bool(state.get("chat")), "threshold": ANSWER_CONFIDENCE_THRESHOLD}
+
+
+@app.get("/ruling/{number}", response_class=HTMLResponse)
+def ruling_page(number: str) -> HTMLResponse:
+    """Render one CBP ruling as its own indexable page."""
+    ruling = state["by_number"].get(number.upper())
+    if ruling is None:
+        raise HTTPException(status_code=404, detail="No such ruling in the corpus.")
+    return HTMLResponse(render_ruling(ruling))
+
+
+@app.get("/sitemap.xml")
+def sitemap() -> Response:
+    """Serve the corpus sitemap, built once at startup."""
+    return Response(content=state["sitemap"], media_type="application/xml")
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots() -> str:
+    """Allow the corpus to be crawled, and keep lookup results out of the index."""
+    return f"User-agent: *\nAllow: /\nDisallow: /?q=\nDisallow: /api/\nSitemap: {BASE_URL}/sitemap.xml\n"

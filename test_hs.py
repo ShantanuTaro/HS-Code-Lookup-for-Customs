@@ -85,3 +85,27 @@ def test_salutation_on_a_shared_line_still_cuts_the_header():
 def test_trade_remedy_provisions_are_not_classification_answers():
     assert cross.normalize_codes("6505.00.6090, 9903.01.24, 9903.88.03") == ["6505006090"]
     assert cross.normalize_codes("9903.01.25") == []
+
+
+def test_ruling_page_renders_fully_linked_and_escaped():
+    import app
+
+    rulings = [
+        make_ruling("N1", "6109100012", "cotton t-shirt <script>alert(1)</script>", "a men's t-shirt of 100% cotton jersey knit fabric, short sleeves, crew neck"),
+        make_ruling("N2", "6110202079", "knit cotton pullover", "a men's pullover sweater of 100% cotton knit fabric with long sleeves"),
+        make_ruling("N3", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+    app.state["client"] = client
+
+    page = app.render_ruling(rulings[0])
+    assert "{{" not in page, "an unreplaced template placeholder shipped to the crawler"
+    assert "<script>alert(1)</script>" not in page and "&lt;script&gt;" in page
+    assert '<link rel="canonical" href="http://localhost:8099/ruling/N1"' in page
+    assert '/ruling/N2' in page, "related rulings are what stop these pages being orphans"
+    assert page.count('href="/ruling/N1"') == 0, "a ruling page must not list itself as related"
+
+    sitemap = app.build_sitemap(rulings)
+    assert all(f"/ruling/{ruling.ruling_number}</loc>" in sitemap for ruling in rulings)
+    app.state.clear()

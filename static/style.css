@@ -1,0 +1,57 @@
+:root { --ink:#12151a; --muted:#5b6675; --line:#e3e7ec; --bg:#fbfcfd; --card:#fff; --ok:#0d6b3f; --hold:#8a5300; --accent:#1a4fd6; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink:#e8ecf2; --muted:#98a3b3; --line:#262c36; --bg:#0e1116; --card:#161a21; --ok:#4ec98a; --hold:#e0a33a; --accent:#7aa2ff; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif; }
+    .wrap { max-width: 62rem; margin:0 auto; padding: 2.5rem 1.25rem 5rem; }
+    header h1 { font-size:1.9rem; line-height:1.25; margin:0 0 .5rem; letter-spacing:-.02em; }
+    header p.sub { color:var(--muted); margin:0 0 2rem; max-width:44rem; }
+    form { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.25rem; }
+    label { display:block; font-weight:600; margin-bottom:.5rem; }
+    textarea { width:100%; min-height:8rem; padding:.75rem; font:inherit; color:inherit; background:transparent;
+               border:1px solid var(--line); border-radius:8px; resize:vertical; }
+    textarea:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .row { display:flex; gap:1rem; align-items:center; margin-top:.75rem; flex-wrap:wrap; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:.7rem 1.4rem; font:inherit; font-weight:600; cursor:pointer; }
+    .hint { color:var(--muted); font-weight:400; font-size:.875rem; }
+    .result { margin-top:2rem; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.5rem; }
+    .verdict { font-size:.8rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; margin:0; }
+    .verdict.answered { color:var(--ok); }
+    .verdict.escalated { color:var(--hold); }
+    .code { font:700 2.6rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; margin:.35rem 0 .5rem; letter-spacing:.02em; }
+    .note, .reasoning { color:var(--muted); margin:.35rem 0 0; }
+    .confidence { color:var(--muted); font-size:.875rem; margin:1rem 0 0; }
+    .result h2 { font-size:.8rem; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:1.75rem 0 .6rem; }
+    ol.rulings { list-style:none; margin:0; padding:0; }
+    ol.rulings li { display:grid; grid-template-columns:7rem 5rem 1fr auto; gap:.75rem; align-items:baseline;
+                    padding:.6rem 0; border-top:1px solid var(--line); font-size:.9rem; }
+    ol.rulings li.cited { font-weight:600; }
+    ol.rulings li.cited a::after { content:" ●"; color:var(--accent); font-size:.7em; vertical-align:middle; }
+    ol.rulings .hs { font-family:ui-monospace, Menlo, monospace; }
+    ol.rulings .subject { color:var(--muted); font-weight:400; }
+    ol.rulings .date { color:var(--muted); font-variant-numeric:tabular-nums; font-weight:400; }
+    a { color:var(--accent); }
+    .about { margin-top:3.5rem; border-top:1px solid var(--line); padding-top:2rem; }
+    .about h2 { font-size:1.1rem; margin:1.75rem 0 .4rem; }
+    .about p { color:var(--muted); max-width:46rem; }
+    @media (max-width:38rem) { ol.rulings li { grid-template-columns:1fr; gap:.15rem; } .code { font-size:2rem; } }
+
+/* Ruling pages: the indexable corpus surface. */
+.crumb { font-size:.875rem; color:var(--muted); margin:0 0 1.25rem; }
+.ruling-head { border-bottom:1px solid var(--line); padding-bottom:1.5rem; margin-bottom:1.5rem; }
+.ruling-head h1 { font-size:1.5rem; margin:0 0 .75rem; }
+.codes { display:flex; flex-wrap:wrap; gap:.5rem; margin:0 0 .75rem; padding:0; list-style:none; }
+.codes li { font-family:ui-monospace, Menlo, monospace; font-size:.9rem; background:var(--card);
+            border:1px solid var(--line); border-radius:6px; padding:.25rem .6rem; }
+.codes li .hs6 { font-weight:700; }
+.meta { color:var(--muted); font-size:.875rem; margin:0; }
+.body-text { white-space:pre-wrap; margin:0 0 2rem; }
+.cta { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.25rem; margin:2rem 0; }
+.cta h2 { margin:0 0 .4rem; font-size:1.05rem; }
+.cta p { margin:0 0 .9rem; color:var(--muted); }
+.cta a.button { display:inline-block; background:var(--accent); color:#fff; text-decoration:none;
+                border-radius:8px; padding:.6rem 1.2rem; font-weight:600; }
+.related { list-style:none; margin:0; padding:0; }
+.related li { border-top:1px solid var(--line); padding:.65rem 0; font-size:.925rem; }
+.related .hs { font-family:ui-monospace, Menlo, monospace; color:var(--muted); margin-left:.5rem; }

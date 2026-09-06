@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{TITLE}}</title>
+  <meta name="description" content="{{META}}" />
+  <link rel="canonical" href="{{CANONICAL}}" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128230;</text></svg>" />
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="/">HS code lookup</a> &rsaquo; CBP ruling {{NUMBER}}</p>
+
+  <article>
+    <header class="ruling-head">
+      <h1>{{SUBJECT}}</h1>
+      <ul class="codes">{{CODES}}</ul>
+      <p class="meta">CBP ruling <strong>{{NUMBER}}</strong> &middot; issued {{DATE}} &middot;
+        <a href="https://rulings.cbp.gov/ruling/{{NUMBER}}" rel="noopener" target="_blank">read the original on CROSS</a></p>
+    </header>
+
+    <h2>Merchandise as described to CBP</h2>
+    <p class="body-text">{{DESCRIPTION}}</p>
+  </article>
+
+  <section class="cta">
+    <h2>Classifying something similar?</h2>
+    <p>Describe your goods and get a subheading traced to rulings like this one — or an explicit
+      refusal when the rulings don't support an answer.</p>
+    <a class="button" href="/?q={{QUERY}}">Classify goods like this</a>
+  </section>
+
+  <section>
+    <h2>Related CBP rulings</h2>
+    <ul class="related">{{RELATED}}</ul>
+  </section>
+
+  <section class="about">
+    <p>This page reproduces the merchandise description from a classification ruling published by
+      U.S. Customs and Border Protection through
+      <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a>. CBP rulings are
+      public records. The ruling applies to the goods described in it and to the importer who
+      requested it; it is not a classification of your goods, and it is not customs advice.</p>
+  </section>
+</div>
+</body>
+</html>
