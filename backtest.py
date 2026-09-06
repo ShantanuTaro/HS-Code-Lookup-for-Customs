@@ -51,6 +51,7 @@ class Report(BaseModel):
     model: str
     fell_back_to_baseline: int
     accuracy_hs6: float
+    accuracy_hs6_model_only: float
     accuracy_hs4: float
     retrieval_recall_at_k: float
     threshold: float
@@ -136,6 +137,7 @@ def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
                 correct = sum(item.correct_hs6 for item in results)
                 print(f"  {done}/{len(held_out)} | HS6 {correct / done:.1%} | {rate * 60:.1f}/min | ~{(len(held_out) - done) / max(rate, 1e-9) / 60:.0f} min left", file=sys.stderr, flush=True)
 
+    from_model = [result for result in results if not result.from_baseline]
     answered = [result for result in results if result.disposition == "answered"]
     escalated = [result for result in results if result.disposition == "escalated"]
     return Report(
@@ -145,6 +147,9 @@ def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
         model=(chat.model if chat else "retrieval-baseline"),
         fell_back_to_baseline=sum(result.from_baseline for result in results),
         accuracy_hs6=sum(result.correct_hs6 for result in results) / len(results),
+        # Reported separately because a rate-limited call falls back to the baseline, and averaging
+        # the two would quietly report the baseline's accuracy as the model's.
+        accuracy_hs6_model_only=(sum(r.correct_hs6 for r in from_model) / len(from_model)) if from_model else 0.0,
         accuracy_hs4=sum(result.correct_hs4 for result in results) / len(results),
         retrieval_recall_at_k=sum(result.expected_hs6 in result.retrieved_hs6 for result in results) / len(results),
         threshold=ANSWER_CONFIDENCE_THRESHOLD,
