@@ -35,6 +35,7 @@ measured accuracy rather than taste.
 | `retrieve.py`  | Hybrid dense+sparse retrieval over the corpus, RRF-fused and reranked       |
 | `classify.py`  | Classify against retrieved rulings, then apply the gate                     |
 | `backtest.py`  | Held-out accuracy and the threshold calibration sweep                       |
+| `app.py`       | Free single-lookup page and the JSON endpoint behind it                    |
 | `test_hs.py`   | Leakage, gate, retrieval and split checks                                   |
 
 ### Label leakage
@@ -54,6 +55,8 @@ cp .env.example .env          # add GROQ_API_KEY
 .venv/bin/python backtest.py --cases 500                    # the kill switch
 .venv/bin/python backtest.py --cases 500 --no-model         # retrieval-only floor
 .venv/bin/python -m pytest test_hs.py -q
+
+.venv/bin/uvicorn app:app --port 8099   # the free lookup page
 ```
 
 `backtest.py` prints ungated HS6/HS4 accuracy, retrieval recall@k (the ceiling on everything else),
@@ -64,5 +67,5 @@ precision clears what an entry filing needs; that number goes in `classify.ANSWE
 
 - [x] 1. Repoint retrieval at CROSS
 - [ ] 2. Backtest 500 published rulings — **the kill switch**; near 80% means the thesis is wrong
-- [ ] 3. Free single-lookup page (SEO surface)
+- [x] 3. Free single-lookup page (SEO surface)
 - [ ] 4. Stripe-billed API tier

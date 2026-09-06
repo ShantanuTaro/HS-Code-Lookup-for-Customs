@@ -72,3 +72,16 @@ def test_holdout_is_removed_from_the_corpus():
     assert len(held_out) == 5 and len(corpus) == 15
     assert not {r.ruling_number for r in corpus} & {r.ruling_number for r in held_out}
     assert backtest.split(rulings, 5, 1)[1] == held_out, "the split must be reproducible across runs"
+
+
+def test_salutation_on_a_shared_line_still_cuts_the_header():
+    modern = RULING_TEXT.replace("\r\r", "  ").replace("\r", " ")
+    description = cross.extract_description(modern)
+    assert "cotton jersey knit" in description
+    assert not cross.HTS_CODE.findall(description)
+    assert len(description) > cross.MINIMUM_DESCRIPTION_CHARACTERS
+
+
+def test_trade_remedy_provisions_are_not_classification_answers():
+    assert cross.normalize_codes("6505.00.6090, 9903.01.24, 9903.88.03") == ["6505006090"]
+    assert cross.normalize_codes("9903.01.25") == []

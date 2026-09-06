@@ -31,8 +31,15 @@ HOLDING_MARKERS = re.compile(
     r"^\s*HOLDING|^\s*ISSUE|^\s*LAW AND ANALYSIS|we find that|it is the decision",
     re.IGNORECASE | re.MULTILINE,
 )
-SALUTATION = re.compile(r"^Dear\b.*:\s*$", re.MULTILINE)
+# Not anchored to a line: rulings issued from 2025 on flow the salutation and the first body
+# sentence onto one line, and an anchored match silently found nothing there, leaving the
+# TARIFF NO. header in the text so the description was cut to nothing a hundred characters later.
+SALUTATION = re.compile(r"Dear\s+[^\n:]{0,80}:")
 MINIMUM_DESCRIPTION_CHARACTERS = 200
+# CBP throttles after a few thousand requests. Without a retry the crawl keeps running and simply
+# stops collecting, which is worse than stopping: it produces a corpus with a hole in its most
+# recent years and no indication that anything went wrong.
+FETCH_RETRIES = 5
 
 
 class Ruling(BaseModel):
@@ -53,11 +60,17 @@ class Ruling(BaseModel):
 
 
 def normalize_codes(tariffs: str) -> list[str]:
-    """Turn the API's free-text tariff field into deduplicated digit-only HTS codes."""
+    """Return the substantive HTS codes, dropping Chapter 98 and 99 provisions.
+
+    Chapters 98 and 99 are US-only: special classification provisions and trade remedies such as
+    Section 301 and IEEPA duties. They ride alongside the real subheading rather than replacing it,
+    and they do not exist in the 6-digit international HS at all, so scoring a prediction against
+    `990301` would be scoring it against something no classifier should ever return.
+    """
     seen: dict[str, None] = {}
     for candidate in re.findall(r"\d{4}[.\d]*", tariffs or ""):
         digits = candidate.replace(".", "")
-        if len(digits) >= 6:
+        if len(digits) >= 6 and digits[:2] not in {"98", "99"}:
             seen.setdefault(digits, None)
     return list(seen)
 
@@ -104,14 +117,24 @@ def search_year(client: httpx.Client, year: int) -> list[dict]:
 
 
 def fetch_ruling(client: httpx.Client, row: dict) -> Ruling | None:
-    """Fetch one ruling's full text and build the record, skipping any that cannot be split cleanly."""
-    try:
-        response = client.get(f"{BASE_URL}/ruling/{row['rulingNumber']}")
-        response.raise_for_status()
-        text = response.json()["text"]
-    except (httpx.HTTPError, LookupError, ValueError):
-        return None
-    description = extract_description(text)
+    """Fetch one ruling and build the record, retrying transport failures before giving up.
+
+    Returns `None` only for a ruling that is genuinely unusable — one whose text carries no
+    description once the holding is removed. A fetch that never succeeded raises instead, so a
+    throttled crawl is visible as an error rather than as a smaller corpus.
+    """
+    text = None
+    for attempt in range(FETCH_RETRIES):
+        try:
+            response = client.get(f"{BASE_URL}/ruling/{row['rulingNumber']}")
+            response.raise_for_status()
+            text = response.json()["text"]
+            break
+        except (httpx.HTTPError, LookupError, ValueError):
+            if attempt == FETCH_RETRIES - 1:
+                raise
+            time.sleep(min(2 ** attempt, 30))
+    description = extract_description(text or "")
     if len(description) < MINIMUM_DESCRIPTION_CHARACTERS:
         return None
     return Ruling(
@@ -138,6 +161,23 @@ def load_rulings(path: Path = RULINGS_FILE) -> list[Ruling]:
     return rulings
 
 
+def reparse(path: Path = RULINGS_FILE) -> tuple[int, int]:
+    """Rebuild every stored record's description and codes from its saved text, in place.
+
+    The full ruling text is kept precisely so that a parser fix does not require re-crawling 20,000
+    rulings from CBP. Returns (kept, dropped).
+    """
+    rulings = load_rulings(path)
+    rebuilt: list[Ruling] = []
+    for ruling in rulings:
+        codes = [code for code in ruling.hts_codes if code[:2] not in {"98", "99"}]
+        description = extract_description(ruling.text) if ruling.text else ruling.description
+        if codes and len(description) >= MINIMUM_DESCRIPTION_CHARACTERS:
+            rebuilt.append(ruling.model_copy(update={"hts_codes": codes, "description": description}))
+    path.write_text("".join(ruling.model_dump_json() + "\n" for ruling in rebuilt), encoding="utf-8")
+    return len(rebuilt), len(rulings) - len(rebuilt)
+
+
 def crawl(from_year: int, to_year: int, workers: int = 8, path: Path = RULINGS_FILE) -> int:
     """Append every not-yet-fetched ruling in the year range, so an interrupted crawl resumes cheaply."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,13 +186,25 @@ def crawl(from_year: int, to_year: int, workers: int = 8, path: Path = RULINGS_F
     with httpx.Client(timeout=60.0, headers={"User-Agent": "hs-classify/0.1"}) as client:
         for year in range(from_year, to_year + 1):
             rows = [row for row in search_year(client, year) if row["rulingNumber"] not in have]
+            failed = unusable = 0
+
+            def fetch(row: dict) -> Ruling | None:
+                nonlocal failed
+                try:
+                    return fetch_ruling(client, row)
+                except (httpx.HTTPError, LookupError, ValueError):
+                    failed += 1
+                    return None
+
             with path.open("a", encoding="utf-8") as handle, ThreadPoolExecutor(max_workers=workers) as pool:
-                for ruling in pool.map(lambda row: fetch_ruling(client, row), rows):
-                    if ruling is not None:
+                for ruling in pool.map(fetch, rows):
+                    if ruling is None:
+                        unusable += 1
+                    else:
                         handle.write(ruling.model_dump_json() + "\n")
                         added += 1
                 handle.flush()
-            print(f"{year}: {len(rows)} new, {added} total written", flush=True)
+            print(f"{year}: {len(rows)} found, {len(rows) - failed - unusable} written, {unusable} unusable, {failed} FAILED ({added} total)", flush=True)
             time.sleep(1)
     return added
 
@@ -163,7 +215,12 @@ def main() -> None:
     parser.add_argument("--from-year", type=int, default=2015)
     parser.add_argument("--to-year", type=int, default=2026)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--reparse", action="store_true", help="Rebuild descriptions from stored text instead of crawling.")
     args = parser.parse_args()
+    if args.reparse:
+        kept, dropped = reparse()
+        print(f"reparsed {kept} rulings, dropped {dropped}")
+        return
     print(f"wrote {crawl(args.from_year, args.to_year, args.workers)} rulings to {RULINGS_FILE}")
 
 

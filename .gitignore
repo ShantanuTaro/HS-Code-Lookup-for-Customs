@@ -5,3 +5,4 @@ __pycache__/
 data/*.jsonl
 .pytest_cache/
 data/*.log
+data/*.backup.jsonl
