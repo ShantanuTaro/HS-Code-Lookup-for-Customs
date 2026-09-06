@@ -39,6 +39,7 @@ class CaseResult(BaseModel):
     correct_hs6: bool
     correct_hs4: bool
     from_baseline: bool
+    served_by: str | None
     retrieved_hs6: list[str]
 
 
@@ -52,6 +53,7 @@ class Report(BaseModel):
     fell_back_to_baseline: int
     accuracy_hs6: float
     accuracy_hs6_model_only: float
+    accuracy_by_model: dict[str, float]
     accuracy_hs4: float
     retrieval_recall_at_k: float
     threshold: float
@@ -83,6 +85,7 @@ def score(ruling: Ruling, result: Classification) -> CaseResult:
         citations=result.citations,
         correct_hs6=result.hs6 in expected_hs6,
         from_baseline=result.reasoning.startswith(BASELINE_MARKER),
+        served_by=result.served_by,
         correct_hs4=bool(result.hs6) and result.hs6[:4] in {code[:4] for code in expected_hs6},
         retrieved_hs6=[hit.hs6 for hit in result.candidates],
     )
@@ -150,6 +153,16 @@ def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
         # Reported separately because a rate-limited call falls back to the baseline, and averaging
         # the two would quietly report the baseline's accuracy as the model's.
         accuracy_hs6_model_only=(sum(r.correct_hs6 for r in from_model) / len(from_model)) if from_model else 0.0,
+        # Split by provider: a chain is two different models, and one number across both would hide
+        # which one is actually doing the work.
+        accuracy_by_model={
+            name: sum(r.correct_hs6 for r in group) / len(group)
+            for name, group in (
+                (name, [r for r in from_model if r.served_by == name])
+                for name in sorted({r.served_by for r in from_model if r.served_by})
+            )
+            if group
+        },
         accuracy_hs4=sum(result.correct_hs4 for result in results) / len(results),
         retrieval_recall_at_k=sum(result.expected_hs6 in result.retrieved_hs6 for result in results) / len(results),
         threshold=ANSWER_CONFIDENCE_THRESHOLD,

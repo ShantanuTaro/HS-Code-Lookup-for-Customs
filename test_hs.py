@@ -135,3 +135,34 @@ def test_rate_limit_backoff_grows_and_is_capped():
     assert classify.retry_delay(0) == classify.BACKOFF_BASE_SECONDS
     assert classify.retry_delay(3) == classify.BACKOFF_BASE_SECONDS * 8
     assert classify.retry_delay(20) == classify.MAXIMUM_BACKOFF_SECONDS
+
+
+def test_fallback_chain_moves_on_and_stamps_who_answered():
+    import httpx
+
+    class Dead:
+        model = "dead-model"
+
+        def complete_json(self, *, system, user):
+            raise httpx.HTTPError("rate limited")
+
+    class Alive:
+        model = "live-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete_json(self, *, system, user):
+            self.calls += 1
+            return {"hs6": "610910", "reasoning": "r", "citations": ["N1"], "confidence": 0.95}
+
+    alive = Alive()
+    chain = classify.FallbackChatClient([Dead(), alive])
+    assert chain.complete_json(system="s", user="u")["_served_by"] == "live-model"
+    assert alive.calls == 1
+    assert chain.model == "dead-model -> live-model"
+
+    import pytest
+
+    with pytest.raises(httpx.HTTPError):
+        classify.FallbackChatClient([Dead(), Dead()]).complete_json(system="s", user="u")

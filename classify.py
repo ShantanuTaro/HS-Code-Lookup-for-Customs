@@ -26,12 +26,21 @@ load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 # taste: raising it trades coverage for precision, and both numbers are printed by the backtest.
 ANSWER_CONFIDENCE_THRESHOLD = 0.90
 RETRIEVAL_TOP_K = 8
-DEFAULT_MODEL = "openai/gpt-oss-120b"
+# Both providers speak the OpenAI chat-completions dialect, so one client covers them and the only
+# difference is a base URL. Ordered: the first with a key configured is tried first, and the rest
+# exist so a rate-limited provider costs a few seconds rather than the whole run.
+PROVIDERS = (
+    ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-120b"),
+    ("mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY", "MISTRAL_MODEL", "mistral-large-latest"),
+)
 CACHE_FILE = Path(__file__).resolve().parent / "data" / "llm_cache.jsonl"
 # The free tier's per-minute token budget is the binding constraint on a 500-case backtest, so a
 # 429 is an expected part of a normal run rather than a failure. Waiting is correct; falling back
 # to the baseline here would quietly turn a rate limit into a worse accuracy number.
 RATE_LIMIT_RETRIES = 12
+# A provider with somewhere to fail over to should give up quickly; only the last one in the chain
+# is worth waiting on, because after it there is nothing left but the baseline.
+FAILOVER_RETRIES = 2
 # Both rate-limit headers proved to be misinformation. retry-after was observed at 357s for a budget
 # that had already reset; x-ratelimit-reset-tokens says 1ms because it reports the next token drip,
 # not the point at which 3,300 tokens are available again. Trusting the first stalled the run to one
@@ -59,6 +68,8 @@ Reply with JSON only: {"hs6": "XXXXXX", "reasoning": "...", "citations": ["N1234
 class ChatClient(Protocol):
     """The single call classification makes, so a stub or cache can stand in for the provider."""
 
+    model: str
+
     def complete_json(self, *, system: str, user: str) -> dict: ...
 
 
@@ -72,6 +83,7 @@ class Classification(BaseModel):
     disposition: Literal["answered", "escalated"]
     reason: str
     candidates: list[Hit]
+    served_by: str | None = None
 
     @property
     def answer(self) -> str | None:
@@ -84,15 +96,17 @@ def retry_delay(attempt: int) -> float:
     return min(BACKOFF_BASE_SECONDS * 2 ** attempt, MAXIMUM_BACKOFF_SECONDS)
 
 
-class GroqChatClient:
-    """Groq chat client constrained to JSON replies, with an on-disk cache keyed by the prompt.
+class OpenAICompatibleChatClient:
+    """One chat client for any OpenAI-dialect provider, with an on-disk cache keyed by the prompt.
 
     The cache exists because the backtest re-runs the same 500 prompts every time the prompt or the
-    threshold changes; without it, each iteration pays for the corpus again.
+    threshold changes; without it, each iteration pays for the corpus again. The model name is part
+    of the key, so two providers never read each other's answers.
     """
 
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, cache_file: Path = CACHE_FILE) -> None:
-        self.api_key, self.model, self.cache_file = api_key, model, cache_file
+    def __init__(self, name: str, api_key: str, base_url: str, model: str, *, retries: int = RATE_LIMIT_RETRIES, cache_file: Path = CACHE_FILE) -> None:
+        self.name, self.api_key, self.base_url, self.model = name, api_key, base_url, model
+        self.retries, self.cache_file = retries, cache_file
         self.cache = {}
         if cache_file.exists():
             for line in cache_file.read_text(encoding="utf-8").splitlines():
@@ -103,13 +117,13 @@ class GroqChatClient:
                     continue
 
     def complete_json(self, *, system: str, user: str) -> dict:
-        """Return one parsed JSON object, from cache when the exact prompt was seen before."""
+        """Return one parsed JSON object, from cache when this model has seen the exact prompt."""
         key = hashlib.sha256(f"{self.model}\n{system}\n{user}".encode("utf-8")).hexdigest()
         if key in self.cache:
-            return self.cache[key]
-        for attempt in range(RATE_LIMIT_RETRIES):
+            return {**self.cache[key], "_served_by": self.model}
+        for attempt in range(self.retries):
             response = httpx.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json={
                     "model": self.model,
@@ -130,13 +144,48 @@ class GroqChatClient:
         self.cache_file.parent.mkdir(parents=True, exist_ok=True)
         with self.cache_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"key": key, "value": payload}) + "\n")
-        return payload
+        return {**payload, "_served_by": self.model}
+
+
+class FallbackChatClient:
+    """Try each provider in turn, so one provider's rate limit is a few seconds, not the run.
+
+    Which model actually answered is stamped onto every reply. Two providers are two different
+    models with two different accuracies, and blending them into one number would hide exactly the
+    thing a backtest exists to measure.
+    """
+
+    def __init__(self, clients: list[ChatClient]) -> None:
+        self.clients = clients
+        self.model = " -> ".join(client.model for client in clients)
+
+    def complete_json(self, *, system: str, user: str) -> dict:
+        """Return the first provider's reply, falling through on any provider-side failure."""
+        for position, client in enumerate(self.clients):
+            try:
+                payload = client.complete_json(system=system, user=user)
+                return {**payload, "_served_by": payload.get("_served_by") or client.model}
+            except (httpx.HTTPError, LookupError, TypeError, ValueError):
+                if position == len(self.clients) - 1:
+                    raise
+        raise LLMUnavailable("No chat provider is configured.")
+
+
+class LLMUnavailable(RuntimeError):
+    """Raised when every configured provider failed, so the caller uses the labelled baseline."""
 
 
 def default_chat_client() -> ChatClient | None:
-    """Resolve the configured model client, or `None` when the retrieval baseline is authoritative."""
-    key = os.getenv("GROQ_API_KEY")
-    return GroqChatClient(key, os.getenv("GROQ_MODEL") or DEFAULT_MODEL) if key else None
+    """Build the provider chain from whichever API keys are configured, newest key order preserved."""
+    configured = [(name, url, os.environ[key], os.getenv(model_var) or default)
+                  for name, url, key, model_var, default in PROVIDERS if os.getenv(key)]
+    if not configured:
+        return None
+    clients = [
+        OpenAICompatibleChatClient(name, api_key, url, model, retries=RATE_LIMIT_RETRIES if position == len(configured) - 1 else FAILOVER_RETRIES)
+        for position, (name, url, api_key, model) in enumerate(configured)
+    ]
+    return clients[0] if len(clients) == 1 else FallbackChatClient(clients)
 
 
 def build_prompt(description: str, hits: list[Hit]) -> str:
@@ -203,6 +252,7 @@ def classify(description: str, *, client: QdrantClient, chat: ChatClient | None 
     try:
         payload = chat.complete_json(system=SYSTEM_PROMPT, user=build_prompt(description, hits))
         proposal = Classification(
+            served_by=str(payload.get("_served_by") or "") or None,
             hs6=str(payload.get("hs6") or "").replace(".", "")[:6] or None,
             reasoning=str(payload.get("reasoning") or ""),
             citations=[str(item) for item in payload.get("citations") or []],

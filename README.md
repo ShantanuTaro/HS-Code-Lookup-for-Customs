@@ -49,7 +49,7 @@ from the index before anything is classified. Both are asserted in `test_hs.py`.
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env          # add GROQ_API_KEY
+cp .env.example .env          # add GROQ_API_KEY and/or MISTRAL_API_KEY
 
 .venv/bin/python cross.py --from-year 2015 --to-year 2026   # ~30k rulings, resumable
 .venv/bin/python backtest.py --cases 500                    # the kill switch
@@ -70,6 +70,14 @@ is a connected graph rather than 23,929 orphans, and each links into the lookup 
 `/sitemap.xml` lists every page; `robots.txt` points at it and keeps `/?q=` lookups out of the
 index, since a separate indexable page per query is how a tool becomes thin content. Set `BASE_URL`
 in the deployment or every canonical tag will claim the pages live on localhost.
+
+### Providers
+
+Both Groq and Mistral speak the OpenAI chat-completions dialect, so one client covers them and the
+only difference is a base URL. Every key configured in `.env` becomes a link in a fallback chain:
+all but the last give up after two retries, so a rate-limited provider costs seconds rather than the
+run. Which model answered is stamped on every result and reported per-provider, because a chain is
+two different models and one blended accuracy number would hide which is doing the work.
 
 `backtest.py` prints ungated HS6/HS4 accuracy, retrieval recall@k (the ceiling on everything else),
 and a coverage-vs-precision table across candidate thresholds. Pick the lowest threshold whose
