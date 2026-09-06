@@ -31,7 +31,7 @@ RETRIEVAL_TOP_K = 8
 # exist so a rate-limited provider costs a few seconds rather than the whole run.
 PROVIDERS = (
     ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-120b"),
-    ("mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY", "MISTRAL_MODEL", "mistral-medium-latest"),
+    ("mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY", "MISTRAL_MODEL", "ministral-3b-latest"),
 )
 CACHE_FILE = Path(__file__).resolve().parent / "data" / "llm_cache.jsonl"
 # The free tier's per-minute token budget is the binding constraint on a 500-case backtest, so a
@@ -175,10 +175,15 @@ class LLMUnavailable(RuntimeError):
     """Raised when every configured provider failed, so the caller uses the labelled baseline."""
 
 
-def default_chat_client() -> ChatClient | None:
-    """Build the provider chain from whichever API keys are configured, newest key order preserved."""
+def default_chat_client(only: str | None = None) -> ChatClient | None:
+    """Build the provider chain from the configured API keys, or pin it to one named provider.
+
+    Pinning matters for measurement: a chain is two models, and a backtest that wants a number for
+    one of them must be able to ask for exactly that one.
+    """
     configured = [(name, url, os.environ[key], os.getenv(model_var) or default)
-                  for name, url, key, model_var, default in PROVIDERS if os.getenv(key)]
+                  for name, url, key, model_var, default in PROVIDERS
+                  if os.getenv(key) and (only is None or name == only)]
     if not configured:
         return None
     clients = [

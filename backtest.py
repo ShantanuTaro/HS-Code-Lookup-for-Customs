@@ -21,7 +21,7 @@ from classify import ANSWER_CONFIDENCE_THRESHOLD, BASELINE_MARKER, Classificatio
 from cross import Ruling, load_rulings
 from retrieve import index
 
-RESULTS_FILE = Path(__file__).resolve().parent / "data" / "backtest.jsonl"
+RESULTS_DIRECTORY = Path(__file__).resolve().parent / "data"
 SWEEP_THRESHOLDS = [0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 0.99]
 
 
@@ -113,7 +113,7 @@ def sweep(results: list[CaseResult]) -> list[dict]:
     return rows
 
 
-def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
+def run(sample_size: int, seed: int, workers: int, use_model: bool, provider: str | None = None, results_file: Path | None = None) -> Report:
     """Split, index the remainder, classify every held-out ruling, and summarize."""
     rulings = load_rulings()
     if len(rulings) < sample_size * 2:
@@ -121,15 +121,17 @@ def run(sample_size: int, seed: int, workers: int, use_model: bool) -> Report:
     corpus, held_out = split(rulings, sample_size, seed)
     client = QdrantClient(":memory:")
     indexed = index(client, corpus)
-    chat = default_chat_client() if use_model else None
+    chat = default_chat_client(provider) if use_model else None
+    # One file per model, so two providers measured in parallel cannot overwrite each other.
+    results_file = results_file or RESULTS_DIRECTORY / f"backtest-{(chat.model if chat else 'baseline').replace('/', '-')}.jsonl"
 
     # Results are written as they land, and progress is printed, because the free tier's token
     # budget makes this a multi-hour run: a crash at case 400 must not throw away 400 classifications,
     # and a run with no output is indistinguishable from a hung one.
-    RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    results_file.parent.mkdir(parents=True, exist_ok=True)
     results: list[CaseResult] = []
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=workers) as pool, RESULTS_FILE.open("w", encoding="utf-8") as handle:
+    with ThreadPoolExecutor(max_workers=workers) as pool, results_file.open("w", encoding="utf-8") as handle:
         for result in pool.map(lambda ruling: score(ruling, classify(ruling.description, client=client, chat=chat)), held_out):
             results.append(result)
             handle.write(result.model_dump_json() + "\n")
@@ -180,8 +182,9 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260906)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--no-model", action="store_true", help="Score the retrieval baseline instead of the model.")
+    parser.add_argument("--provider", default=None, help="Pin to one provider (groq, mistral) instead of the fallback chain.")
     args = parser.parse_args()
-    report = run(args.cases, args.seed, args.workers, not args.no_model)
+    report = run(args.cases, args.seed, args.workers, not args.no_model, args.provider)
     print(report.model_dump_json(indent=2, exclude={"sweep"}))
     print(f"\n{'threshold':>10}{'answered':>10}{'coverage':>10}{'HS6 prec':>10}{'HS4 prec':>10}")
     for row in report.sweep:
