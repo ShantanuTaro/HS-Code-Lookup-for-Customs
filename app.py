@@ -110,6 +110,7 @@ def render_page(query: str, body: str) -> str:
     return (
         TEMPLATE.read_text(encoding="utf-8")
         .replace("{{CANONICAL}}", f"{BASE_URL}/")
+        .replace("{{COUNT}}", f"{state.get('indexed', 0):,}")
         .replace("{{QUERY}}", html.escape(query, quote=True))
         .replace("<!--RESULT-->", body)
     )

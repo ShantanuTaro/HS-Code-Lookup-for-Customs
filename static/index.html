@@ -4,51 +4,134 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HS Code Lookup — classification traced to CBP rulings</title>
-  <meta name="description" content="Free HS code lookup. Every classification is traced to the published CBP rulings that support it, and withheld when the evidence does not support an answer." />
+  <meta name="description" content="Free HS code lookup. Every classification is traced to the published CBP rulings that support it, and withheld when the rulings do not support an answer." />
   <link rel="canonical" href="{{CANONICAL}}" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128230;</text></svg>" />
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128230;</text></svg>" />
 </head>
 <body>
+
+<div class="nav">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="mark">HS</span> HS Code Lookup</a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#refuses">Why it refuses</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+  </div>
+</div>
+
 <div class="wrap">
-  <header>
-    <h1>HS code lookup, traced to the rulings that decide it</h1>
-    <p class="sub">Describe your goods. You get a 6-digit HS subheading with the published CBP rulings
-    that support it — or an explicit refusal to answer when they don't.</p>
+  <header class="hero">
+    <h1>Find your HS code. See the rulings behind it.</h1>
+    <p>Describe your goods and get a 6-digit subheading backed by published CBP
+      rulings — or a straight answer that the rulings don't support one.</p>
   </header>
 
-  <form method="get" action="/">
+  <form class="lookup" method="get" action="/">
     <label for="q">What are you importing?</label>
-    <textarea id="q" name="q" required minlength="12" maxlength="4000"
+    <textarea id="q" name="q" required minlength="12" maxlength="4000" autofocus
       placeholder="A men's t-shirt made of 100% cotton jersey knit fabric, 180 gsm, with short hemmed sleeves and a rib knit crew neckline. Imported in sizes S–XL.">{{QUERY}}</textarea>
-    <div class="row">
+    <div class="actions">
       <button type="submit">Classify</button>
-      <span class="hint">Free. No account. The more specific the description, the better the result.</span>
+      <span class="hint">Free, no account. The more specific the description, the better the result.</span>
+    </div>
+    <div class="examples">
+      <span>Try:</span>
+      <a class="chip" href="/?q=Roasted+arabica+coffee+beans%2C+not+decaffeinated%2C+packed+in+1kg+foil+bags+for+retail+sale.">roasted coffee beans</a>
+      <a class="chip" href="/?q=A+stainless+steel+vacuum+insulated+water+bottle%2C+750ml%2C+with+a+screw+top+lid+and+silicone+base%2C+for+household+use.">insulated water bottle</a>
+      <a class="chip" href="/?q=Wireless+over-ear+headphones+with+built-in+rechargeable+lithium+battery%2C+Bluetooth+5.0%2C+and+an+integrated+microphone.">wireless headphones</a>
+      <a class="chip" href="/?q=A+child%27s+wooden+jigsaw+puzzle+of+24+printed+plywood+pieces+in+a+cardboard+box%2C+for+ages+3+and+up.">wooden jigsaw puzzle</a>
     </div>
   </form>
 
   <!--RESULT-->
-
-  <section class="about">
-    <h2>Why this refuses to answer sometimes</h2>
-    <p>An HS code on a customs entry is a legal declaration. Filing the wrong one is a false statement
-    under 19&nbsp;U.S.C.&nbsp;&sect;1592, and the penalty follows the importer of record, not the tool
-    that suggested it. Tools that always return a code are optimising for looking useful. This one
-    withholds an answer whenever the retrieved rulings don't support it, and tells you that is what
-    happened.</p>
-
-    <h2>Where the answers come from</h2>
-    <p>U.S. Customs and Border Protection publishes its classification rulings through
-    <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a>: decades of decisions
-    about specific goods, each naming the subheading CBP assigned and why. Your description is matched
-    against that corpus, and every ruling used is linked so you can read the reasoning yourself rather
-    than take a model's word for it.</p>
-
-    <h2>What this is not</h2>
-    <p>This is not customs advice, and it is not a binding ruling. Only CBP can issue one, and you can
-    request it free of charge through the same system these answers are drawn from. For a shipment
-    that matters, have a licensed customs broker confirm the classification.</p>
-  </section>
 </div>
+
+<section class="band tint" id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="lede">No black box. Every step is something you can check yourself.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Your description is matched</h3>
+        <p>Against {{COUNT}} classification rulings CBP has published since 2015, searched on what
+          the goods are and what they are made of.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>The rulings decide</h3>
+        <p>A subheading is proposed only from the retrieved rulings, and every ruling it relies on
+          is named and linked so you can read CBP's own reasoning.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>The gate decides again</h3>
+        <p>Below the confidence threshold, or citing anything that wasn't retrieved, the answer is
+          withheld rather than shown to you as if it were sound.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="stats">
+      <div><span class="n">{{COUNT}}</span><span class="l">CBP rulings indexed</span></div>
+      <div><span class="n">2015–2026</span><span class="l">Rulings covered</span></div>
+      <div><span class="n">$0</span><span class="l">To look one up</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="band tint" id="refuses">
+  <div class="wrap">
+    <div class="callout">
+      <h2>Why this sometimes refuses to answer</h2>
+      <p>An HS code on a customs entry is a legal declaration. Filing the wrong one is a false
+        statement under 19&nbsp;U.S.C.&nbsp;&sect;1592, and the penalty follows the importer of
+        record — not the tool that suggested the code.</p>
+      <p>A classifier that always returns something is optimising to look useful. This one withholds
+        the answer whenever the retrieved rulings don't support it, tells you that is what happened,
+        and still shows you every ruling it consulted so you are further along than when you started.</p>
+    </div>
+  </div>
+</section>
+
+<section class="band faq" id="faq">
+  <div class="wrap">
+    <h2>Questions</h2>
+
+    <h3>Where do the answers come from?</h3>
+    <p>U.S. Customs and Border Protection publishes its classification rulings through
+      <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a> — decades of
+      decisions on specific goods, each naming the subheading CBP assigned and why. Every answer here
+      is drawn from that corpus, and every ruling used is linked.</p>
+
+    <h3>What is a 6-digit HS code?</h3>
+    <p>The first six digits are the international Harmonized System subheading, identical across
+      every member country. The digits after that are national — the US adds four more for the full
+      10-digit HTS line that goes on an entry.</p>
+
+    <h3>Is this customs advice?</h3>
+    <p>No, and it is not a binding ruling. Only CBP can issue one, and you can request it free
+      through the same system these answers come from. For a shipment that matters, have a licensed
+      customs broker confirm the classification.</p>
+
+    <h3>Is there an API?</h3>
+    <p>Yes — the same classification and the same gate, as JSON. It is not open for signups yet.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>HS Code Lookup — built on public CBP rulings.</span>
+    <span><a href="/sitemap.xml">All rulings</a> &middot;
+      <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a></span>
+  </div>
+</footer>
+
 </body>
 </html>

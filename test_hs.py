@@ -109,3 +109,23 @@ def test_ruling_page_renders_fully_linked_and_escaped():
     sitemap = app.build_sitemap(rulings)
     assert all(f"/ruling/{ruling.ruling_number}</loc>" in sitemap for ruling in rulings)
     app.state.clear()
+
+
+def test_home_page_renders_both_verdicts_with_no_placeholders_left():
+    import app
+
+    app.state["indexed"] = 23929
+    answered = classify.gate(make_result())
+    withheld = classify.gate(make_result(confidence=0.42))
+
+    for result, verdict in ((answered, "answered"), (withheld, "escalated")):
+        page = app.render_page("cotton t-shirt", app.render_result(result))
+        assert "{{" not in page, "an unreplaced placeholder shipped to the browser"
+        assert f'class="verdict {verdict}"' in page
+        assert "23,929" in page, "the corpus size is quoted on the page and must be the real one"
+        assert '<link rel="canonical" href="http://localhost:8099/"' in page, "canonical must drop the query"
+        assert 'href="/ruling/N1"' in page
+
+    assert '<p class="code">610910</p>' in app.render_page("x", app.render_result(answered))
+    assert 'class="code"' not in app.render_page("x", app.render_result(withheld)), "a withheld answer must never render the code"
+    app.state.clear()
