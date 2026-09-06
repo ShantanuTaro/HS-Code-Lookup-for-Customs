@@ -31,7 +31,7 @@ RETRIEVAL_TOP_K = 8
 # exist so a rate-limited provider costs a few seconds rather than the whole run.
 PROVIDERS = (
     ("groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-120b"),
-    ("mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY", "MISTRAL_MODEL", "mistral-large-latest"),
+    ("mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY", "MISTRAL_MODEL", "mistral-medium-latest"),
 )
 CACHE_FILE = Path(__file__).resolve().parent / "data" / "llm_cache.jsonl"
 # The free tier's per-minute token budget is the binding constraint on a 500-case backtest, so a
