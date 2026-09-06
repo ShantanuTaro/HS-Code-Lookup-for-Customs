@@ -129,3 +129,15 @@ def test_home_page_renders_both_verdicts_with_no_placeholders_left():
     assert '<p class="code">610910</p>' in app.render_page("x", app.render_result(answered))
     assert 'class="code"' not in app.render_page("x", app.render_result(withheld)), "a withheld answer must never render the code"
     app.state.clear()
+
+
+def test_rate_limit_delay_believes_the_specific_header():
+    assert classify.parse_duration("1ms") == 0.001
+    assert classify.parse_duration("7.35s") == 7.35
+    assert round(classify.parse_duration("56m9.6s"), 1) == 3369.6
+    assert classify.parse_duration("") is None
+    # retry-after said six minutes; the budget it gates on had already reset.
+    headers = {"retry-after": "357", "x-ratelimit-reset-tokens": "1ms"}
+    assert classify.retry_delay(headers, 0) == 0.5, "a stale retry-after must not stall the run"
+    assert classify.retry_delay({"retry-after": "357"}, 0) == classify.MAXIMUM_BACKOFF_SECONDS
+    assert classify.retry_delay({}, 3) == 8

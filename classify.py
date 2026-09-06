@@ -31,7 +31,12 @@ CACHE_FILE = Path(__file__).resolve().parent / "data" / "llm_cache.jsonl"
 # The free tier's per-minute token budget is the binding constraint on a 500-case backtest, so a
 # 429 is an expected part of a normal run rather than a failure. Waiting is correct; falling back
 # to the baseline here would quietly turn a rate limit into a worse accuracy number.
-RATE_LIMIT_RETRIES = 6
+RATE_LIMIT_RETRIES = 12
+# Groq answers a 429 with both `retry-after` and `x-ratelimit-reset-tokens`, and they disagree by
+# orders of magnitude: retry-after has been observed at 357s while the token budget it is gating on
+# resets in 1ms. Believe the specific header, and cap whatever is left so one pessimistic hint
+# cannot stall a 500-case run for six minutes at a time.
+MAXIMUM_BACKOFF_SECONDS = 45
 # Marks a result the retrieval baseline produced. The fallback is deliberate in production but
 # must never be invisible: a backtest that silently scores the baseline while reporting the model
 # is a measurement of nothing, which is exactly how the first run of this backtest lied.
@@ -71,6 +76,26 @@ class Classification(BaseModel):
         return self.hs6 if self.disposition == "answered" else None
 
 
+def parse_duration(value: str) -> float | None:
+    """Parse Groq's compound duration strings ("1ms", "7.35s", "56m9.6s") into seconds."""
+    matches = re.findall(r"([\d.]+)(ms|m(?!s)|s|h)", value.strip())
+    if not matches:
+        return None
+    units = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+    return sum(float(amount) * units[unit] for amount, unit in matches)
+
+
+def retry_delay(headers, attempt: int) -> float:
+    """Choose how long to wait after a 429, preferring the header that names the real constraint."""
+    for header in ("x-ratelimit-reset-tokens", "x-ratelimit-reset-requests", "retry-after"):
+        seconds = parse_duration(headers.get(header, "")) if header.startswith("x-") else None
+        if seconds is None and header == "retry-after" and headers.get(header, "").strip():
+            seconds = float(headers[header])
+        if seconds is not None:
+            return min(max(seconds, 0.5), MAXIMUM_BACKOFF_SECONDS)
+    return min(2 ** attempt, MAXIMUM_BACKOFF_SECONDS)
+
+
 class GroqChatClient:
     """Groq chat client constrained to JSON replies, with an on-disk cache keyed by the prompt.
 
@@ -108,7 +133,7 @@ class GroqChatClient:
             )
             if response.status_code != 429:
                 break
-            time.sleep(float(response.headers.get("retry-after") or 0) or min(2 ** attempt, 30))
+            time.sleep(retry_delay(response.headers, attempt))
         response.raise_for_status()
         payload = json.loads(response.json()["choices"][0]["message"]["content"])
         if not isinstance(payload, dict):
