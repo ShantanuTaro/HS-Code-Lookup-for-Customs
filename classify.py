@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 
 import httpx
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from qdrant_client import QdrantClient
 
 from retrieve import Hit, search
@@ -84,6 +84,22 @@ class Classification(BaseModel):
     reason: str
     candidates: list[Hit]
     served_by: str | None = None
+
+    @field_validator("hs6", mode="before")
+    @classmethod
+    def only_a_subheading(cls, value: object) -> str | None:
+        """Normalise the model's subheading, and keep nothing that is not one.
+
+        Separators are stripped so "0901.21.0000" becomes "090121", but anything that is not then
+        all digits — "UNKNOW", a refusal sentence, a chapter name — becomes None rather than being
+        carried on the result. The gate rejects a malformed code too, but the gate only decides
+        whether to answer: without this, the malformed string is still on the object and still in
+        the JSON an API caller reads.
+        """
+        if value is None:
+            return None
+        cleaned = re.sub(r"[.\s\-,]", "", str(value))
+        return cleaned[:6] if re.fullmatch(r"\d{6,}", cleaned) else None
 
     @property
     def answer(self) -> str | None:
@@ -258,7 +274,7 @@ def classify(description: str, *, client: QdrantClient, chat: ChatClient | None 
         payload = chat.complete_json(system=SYSTEM_PROMPT, user=build_prompt(description, hits))
         proposal = Classification(
             served_by=str(payload.get("_served_by") or "") or None,
-            hs6=str(payload.get("hs6") or "").replace(".", "")[:6] or None,
+            hs6=payload.get("hs6"),   # normalised and validated by the field validator
             reasoning=str(payload.get("reasoning") or ""),
             citations=[str(item) for item in payload.get("citations") or []],
             confidence=min(max(float(payload.get("confidence") or 0.0), 0.0), 1.0),

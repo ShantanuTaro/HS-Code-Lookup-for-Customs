@@ -68,6 +68,26 @@ def document_text(ruling: Ruling) -> str:
     return f"{ruling.subject}\n{ruling.description}"
 
 
+def point_id(ruling_number: str) -> str:
+    """The point's id, derived from the ruling number so a ruling can be addressed without a scan."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cross:{ruling_number}"))
+
+
+def get(ruling_number: str, *, client: QdrantClient) -> Hit | None:
+    """Fetch one indexed ruling by number, or None when the corpus does not have it.
+
+    The payload carries everything a ruling page renders, so serving that page needs neither the
+    corpus file nor an in-memory copy of it.
+    """
+    ensure_collection(client)
+    # CROSS numbers are not consistently cased: rulings before roughly 2000 are stored lowercase
+    # ("g83576") and later ones uppercase ("N261740"). A URL, a citation or a link may carry either,
+    # so all three spellings are fetched at once rather than trusting the caller's case.
+    spellings = dict.fromkeys([ruling_number, ruling_number.upper(), ruling_number.lower()])
+    points = client.retrieve(collection_name=COLLECTION, ids=[point_id(s) for s in spellings], with_payload=True)
+    return Hit(**points[0].payload, score=0.0, rerank_score=0.0) if points else None
+
+
 def ensure_collection(client: QdrantClient) -> None:
     """Create the hybrid rulings collection if it does not already exist."""
     if COLLECTION not in {collection.name for collection in client.get_collections().collections}:
@@ -87,7 +107,7 @@ def index(client: QdrantClient, rulings: Iterable[Ruling], batch_size: int = 512
         text = document_text(ruling)
         batch.append(
             PointStruct(
-                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"cross:{ruling.ruling_number}")),
+                id=point_id(ruling.ruling_number),
                 vector={"dense": dense_vector(text), "sparse": sparse_vector(text)},
                 payload={
                     "ruling_number": ruling.ruling_number,

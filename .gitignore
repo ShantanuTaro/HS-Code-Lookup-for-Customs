@@ -6,3 +6,12 @@ data/*.jsonl
 .pytest_cache/
 data/*.log
 data/*.backup.jsonl
+data/qdrant/
+data/qdrant.seed
+preview/
+data/qdrant.sitemap.xml
+data/qdrant.sitemap-*.xml
+
+# Figma Make export and its zip: a design source, not part of the app.
+design/
+*.zip

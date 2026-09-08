@@ -11,14 +11,14 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
 from classify import ANSWER_CONFIDENCE_THRESHOLD, Classification, classify, default_chat_client
-from cross import load_rulings
-from retrieve import index, search
+from cross import RULINGS_FILE, load_rulings
+from retrieve import COLLECTION, get, index, search, tokenize
 
 STATIC = Path(__file__).resolve().parent / "static"
 TEMPLATE = STATIC / "index.html"
@@ -30,22 +30,65 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:8099").rstrip("/")
 RELATED_RULINGS = 6
 MINIMUM_QUERY_CHARACTERS = 12
 MAXIMUM_QUERY_CHARACTERS = 4000
+# Embedded Qdrant by default so a checkout runs with nothing installed; point QDRANT_URL at a
+# server once the corpus outgrows embedded mode, which warns above roughly 20k points.
+QDRANT_URL = os.getenv("QDRANT_URL", "")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
+QDRANT_PATH = Path(__file__).resolve().parent / "data" / "qdrant"
+# Both live outside the storage directory so Qdrant never sees a file it did not write.
+SEED_STAMP = QDRANT_PATH.with_suffix(".seed")
+SITEMAP_FILE = QDRANT_PATH.with_suffix(".sitemap.xml")
+# sitemaps.org caps one sitemap at 50,000 URLs, so past that the corpus is split and /sitemap.xml
+# becomes an index pointing at the parts. A single file over the cap is rejected outright.
+SITEMAP_URLS_PER_FILE = 50_000
+SUGGEST_MINIMUM_CHARACTERS = 3
+SUGGEST_RESULTS = 5
 
 state: dict = {}
 
 
+def corpus_stamp() -> str:
+    """Fingerprint the corpus file, so a rebuild is triggered by a changed file and nothing else.
+
+    Size and modification time rather than a content hash: the corpus is 140MB, and reading all of
+    it to decide whether to read all of it is the cost the stamp exists to avoid.
+    """
+    stat = RULINGS_FILE.stat()
+    return f"{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def seed(client: QdrantClient) -> int:
+    """Index the corpus, or reuse the stored index when the corpus has not changed since it was built.
+
+    Nothing here touches `rulings.jsonl` on the reuse path — not to index, not to build the sitemap,
+    not to serve a ruling page. That file is now approaching a gigabyte, and parsing it was the whole
+    of startup once vectorising was cached. The collection is dropped before a rebuild: upserts alone
+    would leave points for rulings that have since been deleted from the corpus.
+    """
+    stored = SEED_STAMP.read_text().strip() if SEED_STAMP.exists() else ""
+    indexed = COLLECTION in {c.name for c in client.get_collections().collections}
+    if stored == corpus_stamp() and indexed and SITEMAP_FILE.exists():
+        return client.count(collection_name=COLLECTION).count
+    if indexed:
+        client.delete_collection(COLLECTION)
+    rulings = load_rulings(RULINGS_FILE)
+    written = index(client, rulings)
+    build_sitemap(rulings)
+    # Written last, so a crash part-way through indexing reseeds on the next start rather than
+    # trusting a half-built index.
+    SEED_STAMP.write_text(corpus_stamp())
+    # Count rather than trust the write total: CROSS reissues a handful of ruling numbers, and those
+    # collapse onto one point, so a fresh index and a reused one must not report different sizes.
+    return client.count(collection_name=COLLECTION).count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Build the retrieval index once at startup, so a lookup is never charged for indexing."""
-    # ponytail: in-memory Qdrant, which warns above 20k points and rebuilds on every restart.
-    # Move to a Qdrant server when startup time or a second web process makes it hurt.
-    client = QdrantClient(":memory:")
-    rulings = load_rulings()
-    state["indexed"] = index(client, rulings)
+    """Open the index once. An unchanged corpus is neither parsed nor re-vectorised on a restart."""
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY) if QDRANT_URL else QdrantClient(path=str(QDRANT_PATH))
     state["client"] = client
+    state["indexed"] = seed(client)
     state["chat"] = default_chat_client()
-    state["by_number"] = {ruling.ruling_number: ruling for ruling in rulings}
-    state["sitemap"] = build_sitemap(rulings)
     yield
     state.clear()
 
@@ -65,11 +108,68 @@ def lookup(description: str) -> Classification:
     return classify(description.strip(), client=state["client"], chat=state["chat"])
 
 
+def render_rulings(hits: list, cited: set[str]) -> str:
+    """Render retrieved rulings as table rows, marking the ones the answer actually leaned on."""
+    return "".join(
+        f"""<tr class="{'cited' if hit.ruling_number in cited else ''}">
+          <td class="rn"><a href="/ruling/{html.escape(hit.ruling_number)}">{html.escape(hit.ruling_number)}</a></td>
+          <td class="hs">{html.escape(hit.hs6)}</td>
+          <td class="subject">{html.escape(hit.subject)}</td>
+          <td class="date">{html.escape(hit.date)}</td>
+          <td class="tag">{'Cited' if hit.ruling_number in cited else 'Consulted'}</td>
+        </tr>"""
+        for hit in hits
+    )
+
+
+def render_too_short(query: str) -> str:
+    """Answer a too-short query with what the corpus holds for it, rather than an instruction.
+
+    A brand or a bare noun is the common case here, and it is not classifiable: CBP classifies on
+    what an article is made of and what it does, so one brand spans many chapters. Showing that
+    spread is the useful reply — it is the evidence for why more detail is needed, and it costs a
+    retrieval rather than a model call.
+    """
+    hits = search(query, top_k=SUGGEST_RESULTS, client=state["client"]) if len(query) >= SUGGEST_MINIMUM_CHARACTERS else []
+    # Retrieval always returns its top_k, so the tail can be rulings sharing nothing with the query.
+    # The claim below is about rulings that contain the term, so only those may be counted or shown.
+    terms = set(tokenize(query))
+    hits = [hit for hit in hits if terms & set(tokenize(f"{hit.subject} {hit.description}"))]
+    chapters = {hit.hs6[:2] for hit in hits}
+    spread = (
+        f"""<p>In the indexed rulings that term already spans {len(chapters)} different chapters.
+        A brand name is not a classification: CBP classifies on what the article is made of and what
+        it does, so the same brand appears under toys, apparel, stationery and jewellery.</p>"""
+        if len(chapters) > 1 else ""
+    )
+    table = (
+        f"""<h2>Rulings matching that term</h2>
+        <table class="rulings">
+          <thead><tr><th>Ruling</th><th>HS6</th><th>Subject</th><th>Date</th><th>Use</th></tr></thead>
+          <tbody>{render_rulings(hits, set())}</tbody>
+        </table>"""
+        if hits else ""
+    )
+    return f"""<section class="result">
+      <p class="verdict escalated">More detail needed</p>
+      <p class="note">Not enough to classify.</p>
+      <div class="withheld-box">
+        {spread}
+        <p>Describe the goods in a sentence or two: what the article <strong>is</strong>, what it is
+        <strong>made of</strong>, what it is <strong>used for</strong>, and whether it is finished or
+        imported for further manufacture. "A plastic construction toy of moulded ABS interlocking
+        bricks, boxed for retail sale, for ages 6 and up" classifies; a brand name cannot.</p>
+      </div>
+      {table}
+    </section>"""
+
+
 def render_result(result: Classification) -> str:
     """Render the gate's verdict as the headline, because the verdict is what is being sold.
 
-    An escalation is presented as a result rather than as a failure: the rulings that were consulted
-    are still shown, so a withheld answer still leaves the user better off than they started.
+    An escalation is presented as a result rather than as a failure: it gets the same stage as an
+    answer — an em dash where the code would be, at the same size — and the rulings that were
+    consulted are still shown, so a withheld answer leaves the user better off than they started.
     """
     if result.disposition == "answered":
         headline = f"""<p class="verdict answered">Classified</p>
@@ -77,27 +177,27 @@ def render_result(result: Classification) -> str:
         <p class="note">{html.escape(result.reason)}</p>"""
     else:
         headline = f"""<p class="verdict escalated">Not answered</p>
-        <p class="note">{html.escape(result.reason)} A classification below the
-        {ANSWER_CONFIDENCE_THRESHOLD:.0%} threshold is withheld rather than guessed, because a wrong
-        HS code on an entry is a false statement to CBP under 19&nbsp;U.S.C.&nbsp;&sect;1592. The
-        closest rulings are below; a licensed customs broker should make the call.</p>"""
-    cited = set(result.citations)
-    rulings = "".join(
-        f"""<li class="{'cited' if hit.ruling_number in cited else ''}">
-          <a href="/ruling/{html.escape(hit.ruling_number)}">{html.escape(hit.ruling_number)}</a>
-          <span class="hs">{html.escape(hit.hs6)}</span>
-          <span class="subject">{html.escape(hit.subject)}</span>
-          <span class="date">{html.escape(hit.date)}</span>
-        </li>"""
-        for hit in result.candidates
-    )
+        <p class="nocode">WITHHELD</p>
+        <p class="note">Classification withheld.</p>
+        <div class="withheld-box">
+          <p>{html.escape(result.reason)}</p>
+          <p>A classification below the {ANSWER_CONFIDENCE_THRESHOLD:.0%} threshold is withheld rather
+          than guessed: a wrong HS code on an entry is a false statement to CBP under
+          19&nbsp;U.S.C.&nbsp;&sect;1592, and the penalty follows the importer of record.</p>
+          <p>This is not an error. The rulings below may still help you narrow the question, and a
+          licensed customs broker can make the call.</p>
+        </div>"""
+    rows = render_rulings(result.candidates, set(result.citations))
     return f"""<section class="result">
       {headline}
-      <p class="confidence">Model confidence {result.confidence:.0%}</p>
+      <p class="confidence">{result.confidence:.0%}<span>Confidence</span></p>
       <h2>Reasoning</h2>
       <p class="reasoning">{html.escape(result.reasoning)}</p>
-      <h2>CBP rulings consulted <span class="hint">cited rulings highlighted</span></h2>
-      <ol class="rulings">{rulings}</ol>
+      <h2>CBP rulings consulted</h2>
+      <table class="rulings">
+        <thead><tr><th>Ruling</th><th>HS6</th><th>Subject</th><th>Date</th><th>Use</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
     </section>"""
 
 
@@ -116,13 +216,40 @@ def render_page(query: str, body: str) -> str:
     )
 
 
-def build_sitemap(rulings: list) -> str:
-    """Render the corpus as one sitemap, which is what makes these pages discoverable at all."""
-    urls = "".join(
+def sitemap_part(number: int) -> Path:
+    """The path of one sitemap part, named so the route and the writer cannot disagree."""
+    return QDRANT_PATH.with_suffix(f".sitemap-{number}.xml")
+
+
+def build_sitemap(rulings: list) -> int:
+    """Write the corpus as a sitemap index plus its parts, returning how many parts were written.
+
+    These pages are only discoverable through this file, and a sitemap over the 50,000-URL cap is
+    rejected whole rather than truncated — so the corpus is chunked and /sitemap.xml addresses the
+    parts. The index is written last: a crawler that reads it must not find a part still missing.
+    """
+    urls = [f"<url><loc>{BASE_URL}/</loc></url>"] + [
         f"<url><loc>{BASE_URL}/ruling/{quote(ruling.ruling_number)}</loc><lastmod>{ruling.date}</lastmod></url>"
         for ruling in rulings
+    ]
+    chunks = [urls[start:start + SITEMAP_URLS_PER_FILE] for start in range(0, len(urls), SITEMAP_URLS_PER_FILE)] or [[]]
+
+    # A corpus that shrank leaves parts the new index does not name; unreferenced, they would still
+    # be served and crawled.
+    for stale in QDRANT_PATH.parent.glob(f"{QDRANT_PATH.name}.sitemap-*.xml"):
+        stale.unlink()
+
+    for number, chunk in enumerate(chunks):
+        sitemap_part(number).write_text(
+            f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{"".join(chunk)}</urlset>',
+            encoding="utf-8",
+        )
+    parts = "".join(f"<sitemap><loc>{BASE_URL}/sitemap-{number}.xml</loc></sitemap>" for number in range(len(chunks)))
+    SITEMAP_FILE.write_text(
+        f'<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{parts}</sitemapindex>',
+        encoding="utf-8",
     )
-    return f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{BASE_URL}/</loc></url>{urls}</urlset>'
+    return len(chunks)
 
 
 def render_ruling(ruling) -> str:
@@ -162,7 +289,7 @@ def home(q: str = Query(default="", max_length=MAXIMUM_QUERY_CHARACTERS)) -> HTM
     if not query:
         return HTMLResponse(render_page("", ""))
     if len(query) < MINIMUM_QUERY_CHARACTERS:
-        return HTMLResponse(render_page(query, '<section class="result"><p class="note">Describe the goods in a sentence or two — what it is, what it is made of, and what it is used for.</p></section>'))
+        return HTMLResponse(render_page(query, render_too_short(query)))
     return HTMLResponse(render_page(query, render_result(lookup(query))))
 
 
@@ -170,6 +297,22 @@ def home(q: str = Query(default="", max_length=MAXIMUM_QUERY_CHARACTERS)) -> HTM
 def api_classify(request: LookupRequest = Body(...)) -> Classification:
     """Classify one description and return the full result, gate verdict included."""
     return lookup(request.description)
+
+
+@app.get("/api/suggest")
+def suggest(q: str = Query(default="", max_length=MAXIMUM_QUERY_CHARACTERS)) -> list[dict]:
+    """Rulings that already look like what is being typed, for the live panel on the home page.
+
+    Retrieval only — no model call — so this is free to fire on every keystroke and can never
+    produce a classification. It shows what the corpus has, not what the answer is.
+    """
+    query = q.strip()
+    if len(query) < SUGGEST_MINIMUM_CHARACTERS:
+        return []
+    return [
+        {"ruling_number": hit.ruling_number, "hs6": hit.hs6, "subject": hit.subject}
+        for hit in search(query, top_k=SUGGEST_RESULTS, client=state["client"])
+    ]
 
 
 @app.get("/api/health")
@@ -181,16 +324,25 @@ def health() -> dict:
 @app.get("/ruling/{number}", response_class=HTMLResponse)
 def ruling_page(number: str) -> HTMLResponse:
     """Render one CBP ruling as its own indexable page."""
-    ruling = state["by_number"].get(number.upper())
+    ruling = get(number, client=state["client"])
     if ruling is None:
         raise HTTPException(status_code=404, detail="No such ruling in the corpus.")
     return HTMLResponse(render_ruling(ruling))
 
 
 @app.get("/sitemap.xml")
-def sitemap() -> Response:
-    """Serve the corpus sitemap, built once at startup."""
-    return Response(content=state["sitemap"], media_type="application/xml")
+def sitemap() -> FileResponse:
+    """Serve the sitemap index, written to disk when the corpus was last indexed."""
+    return FileResponse(SITEMAP_FILE, media_type="application/xml")
+
+
+@app.get("/sitemap-{number}.xml")
+def sitemap_chunk(number: int) -> FileResponse:
+    """Serve one part of the sitemap. `number` is an int, so it cannot address another file."""
+    path = sitemap_part(number)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No such sitemap.")
+    return FileResponse(path, media_type="application/xml")
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)

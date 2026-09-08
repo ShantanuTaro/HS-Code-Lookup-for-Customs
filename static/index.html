@@ -6,132 +6,236 @@
   <title>HS Code Lookup — classification traced to CBP rulings</title>
   <meta name="description" content="Free HS code lookup. Every classification is traced to the published CBP rulings that support it, and withheld when the rulings do not support an answer." />
   <link rel="canonical" href="{{CANONICAL}}" />
+  <link rel="stylesheet" href="/static/fonts.css" />
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128230;</text></svg>" />
 </head>
 <body>
 
-<div class="nav">
+<header class="nav">
   <div class="wrap">
-    <a class="brand" href="/"><span class="mark">HS</span> HS Code Lookup</a>
+    <a class="brand" href="/"><span class="mark">HS</span> Code Lookup</a>
     <nav>
       <a href="#how">How it works</a>
       <a href="#refuses">Why it refuses</a>
       <a href="#faq">FAQ</a>
     </nav>
   </div>
-</div>
+</header>
 
 <div class="wrap">
-  <header class="hero">
-    <h1>Find your HS code. See the rulings behind it.</h1>
-    <p>Describe your goods and get a 6-digit subheading backed by published CBP
-      rulings — or a straight answer that the rulings don't support one.</p>
-  </header>
+  <section class="hero hero-grid">
+    <div>
+      <h1>Find your<br />HS code.<br /><span>See the rulings.</span></h1>
+      <p>Every answer traced to published CBP rulings. When the rulings don't support a
+        classification, we say so.</p>
+      <div class="stats">
+        <div><span class="n">{{COUNT}}</span><span class="l">rulings indexed</span></div>
+        <div><span class="n">1989–2026</span><span class="l">coverage</span></div>
+        <div><span class="n">$0</span><span class="l">per lookup</span></div>
+      </div>
+    </div>
 
-  <form class="lookup" method="get" action="/">
-    <label for="q">What are you importing?</label>
-    <textarea id="q" name="q" required minlength="12" maxlength="4000" autofocus
-      placeholder="A men's t-shirt made of 100% cotton jersey knit fabric, 180 gsm, with short hemmed sleeves and a rib knit crew neckline. Imported in sizes S–XL.">{{QUERY}}</textarea>
-    <div class="actions">
-      <button type="submit">Classify</button>
-      <span class="hint">Free, no account. The more specific the description, the better the result.</span>
-    </div>
-    <div class="examples">
-      <span>Try:</span>
-      <a class="chip" href="/?q=Roasted+arabica+coffee+beans%2C+not+decaffeinated%2C+packed+in+1kg+foil+bags+for+retail+sale.">roasted coffee beans</a>
-      <a class="chip" href="/?q=A+stainless+steel+vacuum+insulated+water+bottle%2C+750ml%2C+with+a+screw+top+lid+and+silicone+base%2C+for+household+use.">insulated water bottle</a>
-      <a class="chip" href="/?q=Wireless+over-ear+headphones+with+built-in+rechargeable+lithium+battery%2C+Bluetooth+5.0%2C+and+an+integrated+microphone.">wireless headphones</a>
-      <a class="chip" href="/?q=A+child%27s+wooden+jigsaw+puzzle+of+24+printed+plywood+pieces+in+a+cardboard+box%2C+for+ages+3+and+up.">wooden jigsaw puzzle</a>
-    </div>
-  </form>
+    <form class="lookup" method="get" action="/">
+      <label class="label" for="q">What are you importing?</label>
+      <textarea id="q" name="q" required minlength="12" maxlength="4000"
+        placeholder="e.g. Roasted arabica coffee beans, not decaffeinated, packaged for retail sale in 1 kg nitrogen-flushed foil bags — single origin Ethiopia.">{{QUERY}}</textarea>
+
+      <div class="actions">
+        <button type="submit">Classify</button>
+        <span class="hint">Free · No account</span>
+      </div>
+
+      <div class="examples">
+        <span>Try:</span>
+        <button type="button" class="chip" data-q="Roasted arabica coffee beans, not decaffeinated, packed in 1kg foil bags for retail sale.">Roasted coffee beans</button>
+        <button type="button" class="chip" data-q="A stainless steel vacuum insulated water bottle, 750ml, with a screw top lid and silicone base, for household use.">Insulated water bottle</button>
+        <button type="button" class="chip" data-q="Wireless over-ear headphones with built-in rechargeable lithium battery, Bluetooth 5.0, and an integrated microphone.">Wireless headphones</button>
+        <button type="button" class="chip" data-q="A child's wooden jigsaw puzzle of 24 printed plywood pieces in a cardboard box, for ages 3 and up.">Wooden jigsaw puzzle</button>
+      </div>
+
+      <div class="suggest" id="suggest" hidden aria-live="polite">
+        <p class="suggest-head"><span class="label">Retrieval only</span><span>Press Classify for the graded answer</span></p>
+        <ul id="suggest-list"></ul>
+      </div>
+    </form>
+  </section>
 
   <!--RESULT-->
 </div>
 
-<section class="band tint" id="how">
+<section class="band" id="how">
   <div class="wrap">
     <h2>How it works</h2>
-    <p class="lede">No black box. Every step is something you can check yourself.</p>
     <div class="steps">
       <div class="step">
-        <div class="num">1</div>
-        <h3>Your description is matched</h3>
-        <p>Against {{COUNT}} classification rulings CBP has published since 2015, searched on what
-          the goods are and what they are made of.</p>
+        <div class="num">01</div>
+        <h3>Describe what you're importing</h3>
+        <p>Write in plain English. Include material, function, and whether the article is finished or
+          unfinished. More detail increases retrieval precision.</p>
       </div>
       <div class="step">
-        <div class="num">2</div>
-        <h3>The rulings decide</h3>
-        <p>A subheading is proposed only from the retrieved rulings, and every ruling it relies on
-          is named and linked so you can read CBP's own reasoning.</p>
+        <div class="num">02</div>
+        <h3>Rulings are retrieved and graded</h3>
+        <p>We query {{COUNT}} indexed CBP rulings and rank the ones that match your description. A
+          scoring model measures confidence across the result set.</p>
       </div>
       <div class="step">
-        <div class="num">3</div>
-        <h3>The gate decides again</h3>
-        <p>Below the confidence threshold, or citing anything that wasn't retrieved, the answer is
-          withheld rather than shown to you as if it were sound.</p>
+        <div class="num">03</div>
+        <h3>You get the code or an honest refusal</h3>
+        <p>If confidence is sufficient and the leading rulings agree, you get the 6-digit HS code and
+          every ruling behind it. If not, we say so.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="band">
-  <div class="wrap">
-    <div class="stats">
-      <div><span class="n">{{COUNT}}</span><span class="l">CBP rulings indexed</span></div>
-      <div><span class="n">2015–2026</span><span class="l">Rulings covered</span></div>
-      <div><span class="n">$0</span><span class="l">To look one up</span></div>
+<section class="band" id="refuses">
+  <div class="wrap split">
+    <div>
+      <h2>Why this sometimes refuses</h2>
+      <p class="claim">A wrong HS code is a false statement to CBP.</p>
     </div>
-  </div>
-</section>
-
-<section class="band tint" id="refuses">
-  <div class="wrap">
-    <div class="callout">
-      <h2>Why this sometimes refuses to answer</h2>
-      <p>An HS code on a customs entry is a legal declaration. Filing the wrong one is a false
-        statement under 19&nbsp;U.S.C.&nbsp;&sect;1592, and the penalty follows the importer of
-        record — not the tool that suggested the code.</p>
-      <p>A classifier that always returns something is optimising to look useful. This one withholds
-        the answer whenever the retrieved rulings don't support it, tells you that is what happened,
-        and still shows you every ruling it consulted so you are further along than when you started.</p>
+    <div>
+      <p>Under 19&nbsp;U.S.C.&nbsp;&sect;1592, submitting an incorrect tariff classification — even
+        negligently — can result in civil penalties up to the full value of the merchandise. This tool
+        refuses to classify when the indexed CBP rulings don't clearly support an answer.</p>
+      <p>A refusal is not a failure. It tells you the question needs more work: a binding ruling
+        request directly to CBP, or a consultation with a licensed customs broker.</p>
     </div>
   </div>
 </section>
 
 <section class="band faq" id="faq">
   <div class="wrap">
-    <h2>Questions</h2>
-
-    <h3>Where do the answers come from?</h3>
-    <p>U.S. Customs and Border Protection publishes its classification rulings through
-      <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a> — decades of
-      decisions on specific goods, each naming the subheading CBP assigned and why. Every answer here
-      is drawn from that corpus, and every ruling used is linked.</p>
-
-    <h3>What is a 6-digit HS code?</h3>
-    <p>The first six digits are the international Harmonized System subheading, identical across
-      every member country. The digits after that are national — the US adds four more for the full
-      10-digit HTS line that goes on an entry.</p>
-
-    <h3>Is this customs advice?</h3>
-    <p>No, and it is not a binding ruling. Only CBP can issue one, and you can request it free
-      through the same system these answers come from. For a shipment that matters, have a licensed
-      customs broker confirm the classification.</p>
-
-    <h3>Is there an API?</h3>
-    <p>Yes — the same classification and the same gate, as JSON. It is not open for signups yet.</p>
+    <h2>FAQ</h2>
+    <details>
+      <summary>Is this tool free?</summary>
+      <p>Yes. No account, no subscription, no fee. CBP rulings are public records — this indexes and
+        queries them.</p>
+    </details>
+    <details>
+      <summary>What are CBP rulings?</summary>
+      <p>U.S. Customs and Border Protection publishes its tariff classification rulings through the
+        <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a> database. Each one
+        records how a specific described product was classified under the Harmonized Tariff Schedule,
+        and why.</p>
+    </details>
+    <details>
+      <summary>What is a 6-digit HS code?</summary>
+      <p>The first six digits are the international Harmonized System subheading, identical across
+        every member country. The digits after that are national — the US adds four more for the full
+        10-digit HTS line that goes on an entry.</p>
+    </details>
+    <details>
+      <summary>Why does the tool sometimes refuse to answer?</summary>
+      <p>When no CBP ruling closely matches your description, or when the relevant rulings conflict,
+        the classification is withheld. Filing a wrong HS code is a false statement to CBP under
+        19&nbsp;U.S.C.&nbsp;&sect;1592. It refuses rather than guesses.</p>
+    </details>
+    <details>
+      <summary>Can I rely on this for an actual shipment?</summary>
+      <p>This is for research and orientation. For a binding determination, request a ruling from CBP
+        through CROSS — it is free — or consult a licensed customs broker. Only a CBP-issued binding
+        ruling protects you from reclassification at the border.</p>
+    </details>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <span>HS Code Lookup — built on public CBP rulings.</span>
-    <span><a href="/sitemap.xml">All rulings</a> &middot;
-      <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CROSS</a></span>
+    <div class="foot-cols">
+      <div>
+        <strong>HS Code Lookup</strong>
+        <p>Free HS classification backed by published CBP rulings.</p>
+      </div>
+      <div>
+        <span class="label">Tool</span>
+        <a href="/#how">How it works</a>
+        <a href="/#refuses">Why it refuses</a>
+        <a href="/#faq">FAQ</a>
+      </div>
+      <div>
+        <span class="label">Corpus</span>
+        <a href="/sitemap.xml">All rulings</a>
+      </div>
+      <div>
+        <span class="label">Resources</span>
+        <a href="https://rulings.cbp.gov" rel="noopener" target="_blank">CBP CROSS</a>
+        <a href="https://hts.usitc.gov" rel="noopener" target="_blank">HTS Online</a>
+        <a href="https://www.cbp.gov" rel="noopener" target="_blank">CBP.gov</a>
+      </div>
+    </div>
+    <div class="foot-base">
+      <span>© 2026 HS Code Lookup. For research only. Not affiliated with CBP.</span>
+      <span>Not a licensed customs broker.</span>
+    </div>
   </div>
 </footer>
 
+<script>
+  // A lookup reloads the page with the answer far below the form, so land on the answer.
+  var result = document.querySelector('.result');
+  if (result) result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Examples fill the box rather than run a lookup: a link here would be a GET that costs a model
+  // call, which a prefetcher, a crawler or a refresh can fire with nobody having clicked anything.
+  // Nothing reaches the model until Classify is pressed.
+  var box = document.getElementById('q');
+  document.querySelectorAll('.chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      box.value = chip.dataset.q;
+      box.focus();
+      box.dispatchEvent(new Event('input'));
+    });
+  });
+
+  // Live suggestions come from /api/suggest, which is retrieval over the local index and never
+  // touches the model — so typing is free, and what is shown is what the corpus has, never an
+  // answer. Fires once typing settles rather than per keystroke, and the in-flight request is
+  // aborted when the next one starts so a slow reply cannot overwrite a newer one.
+  var panel = document.getElementById('suggest');
+  var list = document.getElementById('suggest-list');
+  var timer, inflight;
+
+  function render(hits) {
+    if (!hits.length) { panel.hidden = true; return; }
+    list.replaceChildren.apply(list, hits.map(function (hit) {
+      var li = document.createElement('li');
+      var hs = document.createElement('span');
+      hs.className = 'hs';
+      hs.textContent = hit.hs6;
+      var a = document.createElement('a');
+      a.href = '/ruling/' + encodeURIComponent(hit.ruling_number);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = hit.subject;
+      var rn = document.createElement('span');
+      rn.className = 'rn';
+      rn.textContent = hit.ruling_number;
+      li.append(hs, a, rn);
+      return li;
+    }));
+    panel.hidden = false;
+  }
+
+  // A blur closes it, after a beat so a click on one of its links still lands.
+  box.addEventListener('blur', function () { setTimeout(function () { panel.hidden = true; }, 150); });
+  box.addEventListener('focus', function () { if (list.children.length && box.value.trim().length >= 3) panel.hidden = false; });
+
+  box.addEventListener('input', function () {
+    clearTimeout(timer);
+    var query = box.value.trim();
+    if (query.length < 3) { panel.hidden = true; return; }
+    timer = setTimeout(function () {
+      if (inflight) inflight.abort();
+      inflight = new AbortController();
+      fetch('/api/suggest?q=' + encodeURIComponent(query), { signal: inflight.signal })
+        .then(function (response) { return response.json(); })
+        .then(render)
+        .catch(function () { /* aborted or offline: leave the last panel standing */ });
+    }, 250);
+  });
+</script>
 </body>
 </html>

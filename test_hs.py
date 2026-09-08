@@ -106,8 +106,6 @@ def test_ruling_page_renders_fully_linked_and_escaped():
     assert '/ruling/N2' in page, "related rulings are what stop these pages being orphans"
     assert page.count('href="/ruling/N1"') == 0, "a ruling page must not list itself as related"
 
-    sitemap = app.build_sitemap(rulings)
-    assert all(f"/ruling/{ruling.ruling_number}</loc>" in sitemap for ruling in rulings)
     app.state.clear()
 
 
@@ -125,6 +123,12 @@ def test_home_page_renders_both_verdicts_with_no_placeholders_left():
         assert "23,929" in page, "the corpus size is quoted on the page and must be the real one"
         assert '<link rel="canonical" href="http://localhost:8099/"' in page, "canonical must drop the query"
         assert 'href="/ruling/N1"' in page
+
+    # No link on the page may carry a query: /?q= is a GET that costs a model call, and a
+    # prefetcher, a crawler or a refresh would fire it with nobody having pressed Classify.
+    page = app.render_page("", "")
+    assert 'href="/?q=' not in page
+    assert page.count('class="chip" data-q=') == 4
 
     assert '<p class="code">610910</p>' in app.render_page("x", app.render_result(answered))
     assert 'class="code"' not in app.render_page("x", app.render_result(withheld)), "a withheld answer must never render the code"
@@ -166,3 +170,163 @@ def test_fallback_chain_moves_on_and_stamps_who_answered():
 
     with pytest.raises(httpx.HTTPError):
         classify.FallbackChatClient([Dead(), Dead()]).complete_json(system="s", user="u")
+
+
+def test_suggest_is_retrieval_only_and_ignores_a_fragment():
+    import app
+
+    rulings = [
+        make_ruling("N1", "6109100012", "cotton t-shirt", "a men's t-shirt of 100% cotton jersey knit fabric, short sleeves, crew neck"),
+        make_ruling("N2", "8471300100", "portable computer", "a portable laptop computer with an attached keyboard and a 13 inch screen"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+    app.state["client"] = client
+
+    assert app.suggest("co") == [], "below the floor nothing is retrieved, so nothing is shown"
+    hits = app.suggest("cotton knit t-shirt")
+    assert hits[0]["ruling_number"] == "N1" and hits[0]["hs6"] == "610910"
+    assert set(hits[0]) == {"ruling_number", "hs6", "subject"}, "suggestions must not leak a holding"
+    app.state.clear()
+
+
+def test_seed_rebuilds_only_when_the_corpus_file_changes(tmp_path, monkeypatch):
+    import app
+
+    coffee = make_ruling("N1", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags")
+    shirt = make_ruling("N2", "6109100012", "cotton t-shirt", "a men's t-shirt of 100% cotton jersey knit fabric, short sleeves, crew neck")
+    corpus = tmp_path / "rulings.jsonl"
+    corpus.write_text(coffee.model_dump_json() + "\n")
+    monkeypatch.setattr(app, "RULINGS_FILE", corpus)
+    monkeypatch.setattr(app, "SEED_STAMP", tmp_path / "qdrant.seed")
+    monkeypatch.setattr(app, "SITEMAP_FILE", tmp_path / "qdrant.sitemap.xml")
+    monkeypatch.setattr(app, "QDRANT_PATH", tmp_path / "qdrant")
+
+    client = QdrantClient(":memory:")
+    assert app.seed(client) == 1, "an unseeded index must be built"
+
+    # An unchanged corpus must not be re-read at all: emptying the file would be visible if it were.
+    stamp = app.corpus_stamp()
+    corpus.write_text("")
+    import os
+    os.utime(corpus, ns=(0, int(stamp.split(":")[1])))
+    monkeypatch.setattr(app, "corpus_stamp", lambda: stamp)
+    assert app.seed(client) == 1, "an unchanged corpus must reuse the stored index rather than rebuild"
+
+    monkeypatch.undo()
+    monkeypatch.setattr(app, "RULINGS_FILE", corpus)
+    monkeypatch.setattr(app, "SEED_STAMP", tmp_path / "qdrant.seed")
+    monkeypatch.setattr(app, "SITEMAP_FILE", tmp_path / "qdrant.sitemap.xml")
+    monkeypatch.setattr(app, "QDRANT_PATH", tmp_path / "qdrant")
+    corpus.write_text(coffee.model_dump_json() + "\n" + shirt.model_dump_json() + "\n")
+    assert app.seed(client) == 2, "a changed corpus must rebuild"
+    assert "/sitemap-0.xml</loc>" in (tmp_path / "qdrant.sitemap.xml").read_text(), "the index names its parts"
+    assert "/ruling/N2</loc>" in app.sitemap_part(0).read_text(), "the URLs live in the parts"
+
+
+def test_a_ruling_page_is_served_from_the_index_not_the_corpus_file():
+    """The corpus file is nearly a gigabyte; a ruling page must never need it."""
+    import app
+
+    rulings = [
+        make_ruling("N1", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags"),
+        make_ruling("N2", "6109100012", "cotton t-shirt", "a men's t-shirt of 100% cotton jersey knit fabric, short sleeves, crew neck"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+
+    fetched = retrieve.get("N1", client=client)
+    assert fetched is not None and fetched.subject == "roasted coffee" and fetched.hs6 == "090121"
+    assert retrieve.get("NOPE", client=client) is None, "an unknown ruling number must 404, not raise"
+
+    app.state["client"] = client
+    page = app.render_ruling(fetched)
+    assert "{{" not in page and "roasted arabica" in page
+    assert '/ruling/N2' in page, "related rulings still come from retrieval"
+    app.state.clear()
+
+
+def test_a_brand_query_is_answered_with_the_spread_not_an_instruction():
+    import app
+
+    rulings = [
+        make_ruling("N1", "9503000000", "The tariff classification of LEGO minifigure toys", "Moulded plastic minifigure toys representing characters, put up for retail sale."),
+        make_ruling("N2", "6104630000", "The tariff classification of a LEGO costume from China", "A child's costume of knit polyester consisting of a pullover and trousers resembling a character."),
+        make_ruling("N3", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+    app.state["client"] = client
+    app.state["indexed"] = 3
+
+    page = app.render_page("Lego", app.render_too_short("Lego"))
+    assert "{{" not in page
+    assert 'href="/ruling/N1"' in page and 'href="/ruling/N2"' in page, "the rulings behind the refusal must be shown"
+    assert "2 different chapters" in page, "the spread across chapters is the reason more detail is needed"
+    assert 'class="code"' not in page, "a query too short to classify must never render a code"
+
+    # Too short even to retrieve on: guidance only, and no empty table.
+    assert "<table" not in app.render_too_short("ab")
+    app.state.clear()
+
+
+def test_sitemap_splits_at_the_cap_and_the_index_names_every_part(tmp_path, monkeypatch):
+    """A sitemap over 50,000 URLs is rejected whole, so the corpus must be chunked behind an index."""
+    import app
+
+    monkeypatch.setattr(app, "QDRANT_PATH", tmp_path / "qdrant")
+    monkeypatch.setattr(app, "SITEMAP_FILE", tmp_path / "qdrant.sitemap.xml")
+    monkeypatch.setattr(app, "SITEMAP_URLS_PER_FILE", 3)
+
+    rulings = [make_ruling(f"N{n}", "0901210000", f"ruling {n}", "roasted arabica coffee beans in retail bags") for n in range(7)]
+    # 7 rulings plus the home page URL, three to a part.
+    assert app.build_sitemap(rulings) == 3
+
+    index = (tmp_path / "qdrant.sitemap.xml").read_text()
+    assert index.count("<sitemap>") == 3 and "<urlset" not in index
+    assert all(f"/sitemap-{n}.xml</loc>" in index for n in range(3))
+
+    parts = "".join(app.sitemap_part(n).read_text() for n in range(3))
+    assert all(f"/ruling/N{n}</loc>" in parts for n in range(7)), "every ruling must appear in some part"
+    assert parts.count("<url>") == 8, "the home page plus every ruling, once each"
+    assert app.sitemap_part(0).read_text().count("<url>") == 3, "parts must respect the cap"
+
+    # A corpus that shrinks must not leave parts the index no longer names.
+    assert app.build_sitemap(rulings[:2]) == 1
+    assert not app.sitemap_part(1).exists() and not app.sitemap_part(2).exists()
+
+
+def test_a_ruling_page_resolves_whatever_case_the_number_is_written_in():
+    """CROSS numbers are lowercase before ~2000 and uppercase after; 21.6% of the corpus is lowercase."""
+    import app
+
+    rulings = [
+        make_ruling("g83576", "6109100012", "cotton t-shirt", "a men's t-shirt of 100% cotton jersey knit fabric, short sleeves"),
+        make_ruling("N261740", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+
+    for asked in ("g83576", "G83576", "N261740", "n261740"):
+        assert retrieve.get(asked, client=client) is not None, f"/ruling/{asked} must resolve, not 404"
+    assert retrieve.get("NOPE123", client=client) is None, "an unknown number must still 404"
+
+
+def test_a_malformed_subheading_never_reaches_the_result():
+    """The gate withholds a bad code, but the bad string must not survive on the object either."""
+    import classify
+
+    valid = classify.Classification(hs6="090121", reasoning="", citations=[], confidence=0.5,
+                                    disposition="escalated", reason="", candidates=[])
+    assert valid.hs6 == "090121"
+
+    for junk in ("UNKNOW", "unknown", "N/A", "chapter 09", "12345", "", None):
+        result = classify.Classification(hs6=junk, reasoning="", citations=[], confidence=0.5,
+                                         disposition="escalated", reason="", candidates=[])
+        assert result.hs6 is None, f"{junk!r} is not a subheading and must not be carried"
+        assert '"hs6":null' in result.model_dump_json(), "the API response must not leak it either"
+
+    # Separators are normalised, not rejected: this is how the model usually writes a code.
+    for written, expected in (("0901.21.0000", "090121"), ("6109.10", "610910"), ("0901 21 0000", "090121")):
+        assert classify.Classification(hs6=written, reasoning="", citations=[], confidence=0.5,
+                                       disposition="escalated", reason="", candidates=[]).hs6 == expected

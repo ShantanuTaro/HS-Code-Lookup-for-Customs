@@ -1,6 +1,37 @@
-# hs-classify
+<div align="center">
 
-HS code classification traced to CBP rulings, behind a confidence gate. Sold as a self-serve USD API.
+# HS Code Lookup
+
+### Find your HS code. See the rulings behind it.
+
+Every classification traced to the published CBP rulings that support it —<br>
+and withheld outright when they don't.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-000000.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-4b72fe.svg)](https://www.python.org)
+[![Rulings indexed](https://img.shields.io/badge/CBP%20rulings-176%2C972-37d7fa.svg)](https://rulings.cbp.gov)
+[![No build step](https://img.shields.io/badge/build%20step-none-ff8df2.svg)](#run)
+
+</div>
+
+![The lookup page](docs/screenshots/home.png)
+
+**176,972 CBP classification rulings, 1989–2026, behind one text box.** Describe your goods and get
+a 6-digit HS subheading with every ruling it leaned on named and linked — or a straight refusal when
+the rulings don't support one. Seven dependencies, no framework, no build step, no JavaScript
+framework, and a corpus you can rebuild yourself from public records.
+
+|                                                              |                                                          |
+| :----------------------------------------------------------: | :------------------------------------------------------: |
+| ![Classified](docs/screenshots/classified.png)               | ![Withheld](docs/screenshots/withheld.png)               |
+| **Answered** — the code, the confidence, every ruling behind it | **Withheld** — below threshold, and it says so           |
+| ![Ruling page](docs/screenshots/ruling.png)                  | ![Live suggestions](docs/screenshots/suggestions.png)    |
+| **176,972 ruling pages**, each linked to its nearest neighbours | **Live retrieval as you type** — no model call, so it's free |
+
+Every theme value is a CSS custom property with a light and a dark pair, so dark mode is a token
+swap that follows the OS — no toggle, no JavaScript, nothing stored.
+
+![The same page in dark mode](docs/screenshots/dark.png)
 
 ## Why this exists
 
@@ -35,8 +66,9 @@ measured accuracy rather than taste.
 | `retrieve.py`  | Hybrid dense+sparse retrieval over the corpus, RRF-fused and reranked       |
 | `classify.py`  | Classify against retrieved rulings, then apply the gate                     |
 | `backtest.py`  | Held-out accuracy and the threshold calibration sweep                       |
-| `app.py`       | Lookup page, 24k indexable ruling pages, sitemap, JSON endpoint            |
-| `test_hs.py`   | Leakage, gate, retrieval and split checks                                   |
+| `app.py`       | Lookup page, 177k indexable ruling pages, sitemap, JSON endpoint            |
+| `test_hs.py`   | Leakage, gate, retrieval, seeding and sitemap checks                        |
+| `static/`      | The whole front end: two HTML templates, one CSS file, self-hosted fonts    |
 
 ### Label leakage
 
@@ -51,23 +83,24 @@ from the index before anything is classified. Both are asserted in `test_hs.py`.
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env          # add GROQ_API_KEY and/or MISTRAL_API_KEY
 
-.venv/bin/python cross.py --from-year 2015 --to-year 2026   # ~30k rulings, resumable
+.venv/bin/python cross.py --from-year 1989 --to-year 2026   # ~177k rulings, ~2h, resumable
 .venv/bin/python backtest.py --cases 500                    # the kill switch
 .venv/bin/python backtest.py --cases 500 --no-model         # retrieval-only floor
 .venv/bin/python -m pytest test_hs.py -q
 
-.venv/bin/uvicorn app:app --port 8099   # the free lookup page
+.venv/bin/python -m uvicorn app:app --port 8099   # the free lookup page
 ```
 
 ## The SEO surface
 
-The lookup page is one URL competing against Flexport and Avalara. The corpus is 23,929 URLs
+The lookup page is one URL competing against Flexport and Avalara. The corpus is 176,972 URLs
 competing against nothing: `/ruling/N352926` is a real page about a real product, titled with the
 long-tail phrase someone actually searches ("tariff classification of a hat, a headband and a
 blanket from China"). Each one links to the six rulings nearest it in retrieval space, so the corpus
-is a connected graph rather than 23,929 orphans, and each links into the lookup tool.
+is a connected graph rather than 176,972 orphans, and each links into the lookup tool.
 
-`/sitemap.xml` lists every page; `robots.txt` points at it and keeps `/?q=` lookups out of the
+`/sitemap.xml` is an index over `/sitemap-N.xml` parts, because one sitemap is capped at
+50,000 URLs and the corpus is well past that; `robots.txt` points at it and keeps `/?q=` lookups out of the
 index, since a separate indexable page per query is how a tool becomes thin content. Set `BASE_URL`
 in the deployment or every canonical tag will claim the pages live on localhost.
 
@@ -89,3 +122,26 @@ precision clears what an entry filing needs; that number goes in `classify.ANSWE
 - [ ] 2. Backtest 500 published rulings — **the kill switch**; near 80% means the thesis is wrong
 - [x] 3. Free single-lookup page (SEO surface)
 - [ ] 4. Stripe-billed API tier
+
+## Scale notes
+
+The corpus is indexed once and cached: `data/qdrant.seed` fingerprints `rulings.jsonl`, so a restart
+re-reads neither the 790MB corpus nor the vectoriser. Only a changed corpus triggers a rebuild
+(~2-5 minutes for 177k rulings).
+
+Embedded Qdrant warns above roughly 20,000 points and this corpus is nine times that. Point it at a
+server when search gets slow:
+
+```bash
+docker run -d -p 6333:6333 -v "$PWD/data/qdrant-server:/qdrant/storage" qdrant/qdrant
+echo 'QDRANT_URL=http://localhost:6333' >> .env
+```
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
+
+The CBP rulings themselves are US Government public records and are not covered by that licence;
+`rulings.jsonl` is not distributed with this repository because it is 790MB and you can rebuild it
+from source with `cross.py`. Bundled fonts (Inter, IBM Plex Mono) are SIL OFL 1.1 — see
+[`static/fonts/`](static/fonts/).
