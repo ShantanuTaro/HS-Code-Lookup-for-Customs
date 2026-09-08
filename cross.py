@@ -119,7 +119,7 @@ def search_year(client: httpx.Client, year: int) -> list[dict]:
 def fetch_ruling(client: httpx.Client, row: dict) -> Ruling | None:
     """Fetch one ruling and build the record, retrying transport failures before giving up.
 
-    Returns `None` only for a ruling that is genuinely unusable — one whose text carries no
+    Returns `None` only for a ruling that is genuinely unusable - one whose text carries no
     description once the holding is removed. A fetch that never succeeded raises instead, so a
     throttled crawl is visible as an error rather than as a smaller corpus.
     """

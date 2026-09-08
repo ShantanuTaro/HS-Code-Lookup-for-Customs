@@ -1,10 +1,10 @@
 <div align="center">
 
-# HS Code Lookup
+# HS Code Lookup for Customs
 
 ### Find your HS code. See the rulings behind it.
 
-Every classification traced to the published CBP rulings that support it —<br>
+Every classification traced to the published CBP rulings that support it -<br>
 and withheld outright when they don't.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-000000.svg)](LICENSE)
@@ -16,27 +16,27 @@ and withheld outright when they don't.
 
 ![The lookup page](docs/screenshots/home.png)
 
-**176,972 CBP classification rulings, 1989–2026, behind one text box.** Describe your goods and get
-a 6-digit HS subheading with every ruling it leaned on named and linked — or a straight refusal when
+**176,972 CBP classification rulings, 1989-2026, behind one text box.** Describe your goods and get
+a 6-digit HS subheading with every ruling it leaned on named and linked - or a straight refusal when
 the rulings don't support one. Seven dependencies, no framework, no build step, no JavaScript
 framework, and a corpus you can rebuild yourself from public records.
 
 |                                                              |                                                          |
 | :----------------------------------------------------------: | :------------------------------------------------------: |
 | ![Classified](docs/screenshots/classified.png)               | ![Withheld](docs/screenshots/withheld.png)               |
-| **Answered** — the code, the confidence, every ruling behind it | **Withheld** — below threshold, and it says so           |
+| **Answered** - the code, the confidence, every ruling behind it | **Withheld** - below threshold, and it says so           |
 | ![Ruling page](docs/screenshots/ruling.png)                  | ![Live suggestions](docs/screenshots/suggestions.png)    |
-| **176,972 ruling pages**, each linked to its nearest neighbours | **Live retrieval as you type** — no model call, so it's free |
+| **176,972 ruling pages**, each linked to its nearest neighbours | **Live retrieval as you type** - no model call, so it's free |
 
 Every theme value is a CSS custom property with a light and a dark pair, so dark mode is a token
-swap that follows the OS — no toggle, no JavaScript, nothing stored.
+swap that follows the OS - no toggle, no JavaScript, nothing stored.
 
 ![The same page in dark mode](docs/screenshots/dark.png)
 
 ## Why this exists
 
 A wrong HS code on an entry is a false statement to CBP under 19 U.S.C. §1592. Competitors publish
-92–96% accuracy at the 6-digit level and stop there. Nobody sells a classification that is *legally
+92-96% accuracy at the 6-digit level and stop there. Nobody sells a classification that is *legally
 defensible*: reasoning traced to specific published rulings, with a calibrated gate that declines to
 answer rather than guessing. The gate is the product, not a safety feature bolted onto it.
 
@@ -52,7 +52,7 @@ has a statutory citation attached.
 | ---------------------- | --------------------------------------- |
 | `classify_exception`   | `classify.classify`                     |
 | `retrieve_playbook`    | `retrieve.search` over CROSS rulings    |
-| `decide_authorization` | `classify.gate` — answer vs. escalate   |
+| `decide_authorization` | `classify.gate` - answer vs. escalate   |
 
 Same machinery: a deterministic gate the model cannot talk its way past, one auto-answer threshold
 in one place, a labelled fallback instead of a silent one, and a threshold calibrated against
@@ -119,7 +119,7 @@ precision clears what an entry filing needs; that number goes in `classify.ANSWE
 ## Status
 
 - [x] 1. Repoint retrieval at CROSS
-- [ ] 2. Backtest 500 published rulings — **the kill switch**; near 80% means the thesis is wrong
+- [ ] 2. Backtest 500 published rulings - **the kill switch**; near 80% means the thesis is wrong
 - [x] 3. Free single-lookup page (SEO surface)
 - [ ] 4. Stripe-billed API tier
 
@@ -139,9 +139,9 @@ echo 'QDRANT_URL=http://localhost:6333' >> .env
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
 
 The CBP rulings themselves are US Government public records and are not covered by that licence;
 `rulings.jsonl` is not distributed with this repository because it is 790MB and you can rebuild it
-from source with `cross.py`. Bundled fonts (Inter, IBM Plex Mono) are SIL OFL 1.1 — see
+from source with `cross.py`. Bundled fonts (Inter, IBM Plex Mono) are SIL OFL 1.1 - see
 [`static/fonts/`](static/fonts/).

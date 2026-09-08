@@ -91,7 +91,7 @@ class Classification(BaseModel):
         """Normalise the model's subheading, and keep nothing that is not one.
 
         Separators are stripped so "0901.21.0000" becomes "090121", but anything that is not then
-        all digits — "UNKNOW", a refusal sentence, a chapter name — becomes None rather than being
+        all digits - "UNKNOW", a refusal sentence, a chapter name - becomes None rather than being
         carried on the result. The gate rejects a malformed code too, but the gate only decides
         whether to answer: without this, the malformed string is still on the object and still in
         the JSON an API caller reads.

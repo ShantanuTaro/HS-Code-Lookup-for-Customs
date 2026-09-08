@@ -61,7 +61,7 @@ a:hover { color:var(--accent-hover); }
 .nav nav a { font-size:14px; color:var(--ink-2); }
 .nav nav a:hover { color:var(--ink); }
 
-/* Hero — the spectrum appears twice on the page: here and on the code. */
+/* Hero - the spectrum appears twice on the page: here and on the code. */
 .hero-grid { position:relative; display:grid; grid-template-columns:1fr 1fr; gap:72px;
   align-items:start; padding:88px 0 96px; }
 .hero-grid::before { content:""; position:absolute; inset:-40px -40px auto; height:420px; z-index:-1;
@@ -71,7 +71,7 @@ a:hover { color:var(--accent-hover); }
 .hero h1 span { background:var(--spectrum); -webkit-background-clip:text; background-clip:text;
   color:transparent; }
 /* Scoped to the headline column: as `.hero p` this also matched the suggestion panel's header,
-   which sits inside the hero, and beat `.suggest-head` on specificity — squashing it to 420px. */
+   which sits inside the hero, and beat `.suggest-head` on specificity - squashing it to 420px. */
 .hero > div > p { font-size:17px; line-height:1.6; color:var(--ink-2); max-width:420px; margin:0 0 32px; }
 .stats { display:flex; gap:32px; flex-wrap:wrap; }
 .stats .n { display:block; font-family:var(--font-mono); font-size:22px; font-weight:600;
@@ -104,7 +104,7 @@ button:hover, .button:hover { opacity:.82; color:var(--btn-ink); }
   transition:border-color .15s, color .15s; }
 .chip:hover { border-color:var(--ink); color:var(--ink); }
 
-/* Suggestions — in flow, so it can never cover what is being typed. */
+/* Suggestions - in flow, so it can never cover what is being typed. */
 .suggest { position:absolute; top:100%; left:0; right:0; z-index:50; margin-top:8px;
   border:1px solid var(--line-strong); border-radius:var(--r-md); background:var(--bg);
   overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.12); }
@@ -123,7 +123,7 @@ button:hover, .button:hover { opacity:.82; color:var(--btn-ink); }
 .suggest .rn { margin-left:auto; flex-shrink:0; font-family:var(--font-mono); font-size:11px; color:var(--ink-4); }
 .suggest-foot { display:none; }
 
-/* Result — the code carries the spectrum; a withheld answer gets the same stage in grey. */
+/* Result - the code carries the spectrum; a withheld answer gets the same stage in grey. */
 .result { padding:56px 0 0; border-top:1px solid var(--line); margin-bottom:96px;
   scroll-margin-top:76px; }   /* the sticky nav is 60px, so a scrolled-to result clears it */
 .verdict { display:inline-flex; align-items:center; gap:7px; padding:6px 14px;
@@ -193,7 +193,7 @@ section.band { padding:80px 0; border-top:1px solid var(--line); }
 .split p:last-child { margin-bottom:0; }
 #refuses .wrap { padding-top:40px; padding-bottom:40px; border-radius:var(--r-lg); background:var(--wash); }
 
-/* FAQ — <details> is the accordion, so no JavaScript owns it. */
+/* FAQ - <details> is the accordion, so no JavaScript owns it. */
 .faq .wrap { max-width:760px; }
 .faq details { border:1px solid var(--line); border-radius:var(--r-md); margin-bottom:8px;
   background:var(--bg); }
@@ -217,7 +217,7 @@ footer { border-top:1px solid var(--line); background:var(--bg-alt); padding:56p
 .foot-base { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
   padding-top:20px; border-top:1px solid var(--line); font-size:12px; color:var(--ink-3); }
 
-/* Ruling pages — the same palette, used more assertively than on the home page: the header sits
+/* Ruling pages - the same palette, used more assertively than on the home page: the header sits
    on the wash, the leading code carries the spectrum, and related rulings are cards not a list. */
 .ruling { max-width:860px; }
 .crumb { display:flex; gap:8px; align-items:center; margin:36px 0 20px; font-family:var(--font-mono);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HS Code Lookup — classification traced to CBP rulings</title>
+  <title>HS Code Lookup for Customs - classification traced to CBP rulings</title>
   <meta name="description" content="Free HS code lookup. Every classification is traced to the published CBP rulings that support it, and withheld when the rulings do not support an answer." />
   <link rel="canonical" href="{{CANONICAL}}" />
   <link rel="stylesheet" href="/static/fonts.css" />
@@ -14,7 +14,7 @@
 
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="/"><span class="mark">HS</span> Code Lookup</a>
+    <a class="brand" href="/"><span class="mark">HS</span> Code Lookup for Customs</a>
     <nav>
       <a href="#how">How it works</a>
       <a href="#refuses">Why it refuses</a>
@@ -31,7 +31,7 @@
         classification, we say so.</p>
       <div class="stats">
         <div><span class="n">{{COUNT}}</span><span class="l">rulings indexed</span></div>
-        <div><span class="n">1989–2026</span><span class="l">coverage</span></div>
+        <div><span class="n">1989-2026</span><span class="l">coverage</span></div>
         <div><span class="n">$0</span><span class="l">per lookup</span></div>
       </div>
     </div>
@@ -39,7 +39,7 @@
     <form class="lookup" method="get" action="/">
       <label class="label" for="q">What are you importing?</label>
       <textarea id="q" name="q" required minlength="12" maxlength="4000"
-        placeholder="e.g. Roasted arabica coffee beans, not decaffeinated, packaged for retail sale in 1 kg nitrogen-flushed foil bags — single origin Ethiopia.">{{QUERY}}</textarea>
+        placeholder="e.g. Roasted arabica coffee beans, not decaffeinated, packaged for retail sale in 1 kg nitrogen-flushed foil bags - single origin Ethiopia.">{{QUERY}}</textarea>
 
       <div class="actions">
         <button type="submit">Classify</button>
@@ -97,8 +97,8 @@
       <p class="claim">A wrong HS code is a false statement to CBP.</p>
     </div>
     <div>
-      <p>Under 19&nbsp;U.S.C.&nbsp;&sect;1592, submitting an incorrect tariff classification — even
-        negligently — can result in civil penalties up to the full value of the merchandise. This tool
+      <p>Under 19&nbsp;U.S.C.&nbsp;&sect;1592, submitting an incorrect tariff classification - even
+        negligently - can result in civil penalties up to the full value of the merchandise. This tool
         refuses to classify when the indexed CBP rulings don't clearly support an answer.</p>
       <p>A refusal is not a failure. It tells you the question needs more work: a binding ruling
         request directly to CBP, or a consultation with a licensed customs broker.</p>
@@ -111,7 +111,7 @@
     <h2>FAQ</h2>
     <details>
       <summary>Is this tool free?</summary>
-      <p>Yes. No account, no subscription, no fee. CBP rulings are public records — this indexes and
+      <p>Yes. No account, no subscription, no fee. CBP rulings are public records - this indexes and
         queries them.</p>
     </details>
     <details>
@@ -124,7 +124,7 @@
     <details>
       <summary>What is a 6-digit HS code?</summary>
       <p>The first six digits are the international Harmonized System subheading, identical across
-        every member country. The digits after that are national — the US adds four more for the full
+        every member country. The digits after that are national - the US adds four more for the full
         10-digit HTS line that goes on an entry.</p>
     </details>
     <details>
@@ -136,7 +136,7 @@
     <details>
       <summary>Can I rely on this for an actual shipment?</summary>
       <p>This is for research and orientation. For a binding determination, request a ruling from CBP
-        through CROSS — it is free — or consult a licensed customs broker. Only a CBP-issued binding
+        through CROSS - it is free - or consult a licensed customs broker. Only a CBP-issued binding
         ruling protects you from reclassification at the border.</p>
     </details>
   </div>
@@ -146,7 +146,7 @@
   <div class="wrap">
     <div class="foot-cols">
       <div>
-        <strong>HS Code Lookup</strong>
+        <strong>HS Code Lookup for Customs</strong>
         <p>Free HS classification backed by published CBP rulings.</p>
       </div>
       <div>
@@ -167,7 +167,7 @@
       </div>
     </div>
     <div class="foot-base">
-      <span>© 2026 HS Code Lookup. For research only. Not affiliated with CBP.</span>
+      <span>© 2026 HS Code Lookup for Customs. For research only. Not affiliated with CBP.</span>
       <span>Not a licensed customs broker.</span>
     </div>
   </div>
@@ -191,7 +191,7 @@
   });
 
   // Live suggestions come from /api/suggest, which is retrieval over the local index and never
-  // touches the model — so typing is free, and what is shown is what the corpus has, never an
+  // touches the model - so typing is free, and what is shown is what the corpus has, never an
   // answer. Fires once typing settles rather than per keystroke, and the in-flight request is
   // aborted when the next one starts so a slow reply cannot overwrite a newer one.
   var panel = document.getElementById('suggest');
