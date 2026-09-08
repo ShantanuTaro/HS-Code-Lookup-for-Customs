@@ -330,3 +330,16 @@ def test_a_malformed_subheading_never_reaches_the_result():
     for written, expected in (("0901.21.0000", "090121"), ("6109.10", "610910"), ("0901 21 0000", "090121")):
         assert classify.Classification(hs6=written, reasoning="", citations=[], confidence=0.5,
                                        disposition="escalated", reason="", candidates=[]).hs6 == expected
+
+
+def test_every_result_carries_the_ai_disclaimer():
+    """A code must never be shown without it, on either verdict."""
+    import app
+
+    app.state["indexed"] = 176940
+    for result in (classify.gate(make_result()), classify.gate(make_result(confidence=0.42))):
+        page = app.render_page("cotton t-shirt", app.render_result(result))
+        assert 'class="disclaimer"' in page
+        assert "can be wrong" in page and "not customs advice" in page
+        assert "licensed customs broker" in page
+    app.state.clear()

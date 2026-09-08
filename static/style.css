@@ -165,6 +165,14 @@ table.rulings .tag { white-space:nowrap; font-family:var(--font-mono); font-size
   letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); }
 table.rulings tr.cited .tag { color:var(--yes-ink); }
 
+/* The disclaimer sits with the code, not in the footer. */
+.disclaimer { max-width:680px; margin:20px 0 0; padding:14px 16px; font-size:13px; line-height:1.6;
+  color:var(--ink-2); background:var(--bg-alt); border:1px solid var(--line);
+  border-left:3px solid var(--orange); border-radius:var(--r-md); }
+.disclaimer span { display:block; margin-bottom:4px; font-family:var(--font-mono); font-size:10px;
+  font-weight:500; letter-spacing:.12em; text-transform:uppercase; color:var(--orange); }
+.disclaimer strong { color:var(--ink); font-weight:600; }
+
 /* Sections */
 section.band { padding:80px 0; border-top:1px solid var(--line); }
 .band > .wrap > h2 { margin:0 0 36px; }
