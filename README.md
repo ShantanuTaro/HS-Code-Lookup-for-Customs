@@ -2,12 +2,12 @@
 
 # HS Code Lookup for Customs
 
+## [hs-code-lookup-dusky.vercel.app](https://hs-code-lookup-dusky.vercel.app)
+
 ### Find your HS code. See the rulings behind it.
 
 Every classification traced to the published CBP rulings that support it -<br>
-and withheld outright when they don't.
-
-**[Try it live](https://hs-code-lookup-dusky.vercel.app)**
+and withheld outright when they don't. Free, no account.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-000000.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12+-4b72fe.svg)](https://www.python.org)
@@ -27,7 +27,7 @@ framework, and a corpus you can rebuild yourself from public records.
 |                                                              |                                                          |
 | :----------------------------------------------------------: | :------------------------------------------------------: |
 | ![Classified](docs/screenshots/classified.png)               | ![Withheld](docs/screenshots/withheld.png)               |
-| **Answered** - the code, the confidence, every ruling behind it | **Withheld** - below threshold, and it says so           |
+| **Answered** - the code, the confidence, and neighbouring products one click away | **Withheld** - below threshold, and it says so |
 | ![Ruling page](docs/screenshots/ruling.png)                  | ![Live suggestions](docs/screenshots/suggestions.png)    |
 | **176,972 ruling pages**, each linked to its nearest neighbours | **Live retrieval as you type** - no model call, so it's free |
 
