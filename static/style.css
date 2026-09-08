@@ -57,7 +57,7 @@ a:hover { color:var(--accent-hover); }
 .brand .mark { display:grid; place-items:center; width:24px; height:24px; border-radius:var(--r-sm);
   background:var(--spectrum); color:#fff; font-family:var(--font-mono); font-size:10px;
   font-weight:600; letter-spacing:0; }
-.nav nav { display:flex; gap:28px; }
+.nav nav { display:flex; gap:28px; margin-left:auto; }
 .nav nav a { font-size:14px; color:var(--ink-2); }
 .nav nav a:hover { color:var(--ink); }
 
@@ -320,7 +320,11 @@ dialog.progress { width:min(430px, calc(100vw - 32px)); padding:26px; border:1px
    Dismissing hands the content down to the page, so nothing is lost by closing. */
 dialog.progress.shortlist { width:min(760px, calc(100vw - 32px)); }
 dialog.progress.done { width:min(1180px, calc(100vw - 32px)); }
-.progress .outcome:not(:empty) { max-height:76vh; overflow:auto; overscroll-behavior:contain; }
+/* The scrollbar rides the dialog's right border: the padding moves off the dialog and onto the
+   scrolling column, so the content keeps its inset and the track does not. */
+.progress.done { padding-right:0; }
+.progress .outcome:not(:empty) { max-height:76vh; overflow:auto; overscroll-behavior:contain;
+  padding-right:26px; }
 /* The shortlist stays up after the verdict, but inside the same scrolling column as the answer -
    floated beside the code and the reasoning, so the window keeps one section and one scrollbar. */
 .progress.done .stage, .progress.done .bar { display:none; }
