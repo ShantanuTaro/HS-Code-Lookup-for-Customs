@@ -1,0 +1,10 @@
+# The index, the corpus and the design sources: gigabytes, and none of it is deployed. The hosted
+# instance reads QDRANT_URL instead.
+data/
+design/
+preview/
+docs/
+.venv/
+*.zip
+.pytest_cache/
+__pycache__/

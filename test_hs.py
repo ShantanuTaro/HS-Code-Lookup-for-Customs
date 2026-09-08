@@ -141,6 +141,27 @@ def test_rate_limit_backoff_grows_and_is_capped():
     assert classify.retry_delay(20) == classify.MAXIMUM_BACKOFF_SECONDS
 
 
+def test_a_read_only_cache_does_not_cost_the_answer(tmp_path, monkeypatch):
+    """A hosted instance has no writable disk, and a lost cache write reads as a dead provider."""
+    import httpx
+
+    client = classify.OpenAICompatibleChatClient("groq", "key", "https://example.invalid/v1", "m", cache_file=tmp_path / "nope" / "cache.jsonl")
+    monkeypatch.setattr(
+        httpx, "post",
+        lambda *a, **k: httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"hs6": "090111"}'}}]},
+            request=httpx.Request("POST", "https://example.invalid/v1/chat/completions"),
+        ),
+    )
+    def read_only(*args, **kwargs):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr(type(client.cache_file), "mkdir", read_only)
+
+    assert client.complete_json(system="s", user="u")["hs6"] == "090111"
+
+
 def test_fallback_chain_moves_on_and_stamps_who_answered():
     import httpx
 

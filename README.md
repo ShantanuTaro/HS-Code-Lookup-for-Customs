@@ -7,10 +7,13 @@
 Every classification traced to the published CBP rulings that support it -<br>
 and withheld outright when they don't.
 
+**[Try it live](https://hs-code-lookup-dusky.vercel.app)**
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-000000.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12+-4b72fe.svg)](https://www.python.org)
 [![Rulings indexed](https://img.shields.io/badge/CBP%20rulings-176%2C972-37d7fa.svg)](https://rulings.cbp.gov)
 [![No build step](https://img.shields.io/badge/build%20step-none-ff8df2.svg)](#run)
+[![Live](https://img.shields.io/badge/live-hs--code--lookup-ff8705.svg)](https://hs-code-lookup-dusky.vercel.app)
 
 </div>
 
@@ -90,6 +93,22 @@ cp .env.example .env          # add GROQ_API_KEY and/or MISTRAL_API_KEY
 
 .venv/bin/python -m uvicorn app:app --port 8099   # the free lookup page
 ```
+
+## Deploy
+
+The hosted instance runs on Vercel with the index in Qdrant Cloud: the embedded index is 1.1GB and
+the corpus 790MB, and neither fits in a 250MB function on a read-only disk. Nothing is deployed but
+the code and `static/`, and the app skips seeding entirely when `QDRANT_URL` names a populated
+collection.
+
+```bash
+python seed_cloud.py                      # one-off: 177k points into the cluster, ~20 minutes
+vercel env add QDRANT_URL production      # and QDRANT_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, BASE_URL
+vercel deploy --prod
+```
+
+Live at **[hs-code-lookup-dusky.vercel.app](https://hs-code-lookup-dusky.vercel.app)**. Sitemaps are the one thing a hosted
+instance does not serve - they are written next to the corpus, which is not deployed.
 
 ## The SEO surface
 

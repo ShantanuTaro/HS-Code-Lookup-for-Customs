@@ -14,7 +14,7 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, Fusion, FusionQuery, PointStruct, Prefetch, SparseVector, SparseVectorParams, VectorParams
+from qdrant_client.models import Distance, Fusion, FusionQuery, PointStruct, Prefetch, SparseIndexParams, SparseVector, SparseVectorParams, VectorParams
 
 from cross import Ruling
 
@@ -138,10 +138,13 @@ def get(ruling_number: str, *, client: QdrantClient) -> Hit | None:
 def ensure_collection(client: QdrantClient) -> None:
     """Create the hybrid rulings collection if it does not already exist."""
     if COLLECTION not in {collection.name for collection in client.get_collections().collections}:
+        # Vectors, sparse index and payload all on disk: the whole corpus is 1.3GB of index and
+        # 800MB of ruling text, and a hosted node is sized in RAM. Local mode ignores these.
         client.create_collection(
             collection_name=COLLECTION,
-            vectors_config={"dense": VectorParams(size=DENSE_DIMENSIONS, distance=Distance.COSINE)},
-            sparse_vectors_config={"sparse": SparseVectorParams()},
+            vectors_config={"dense": VectorParams(size=DENSE_DIMENSIONS, distance=Distance.COSINE, on_disk=True)},
+            sparse_vectors_config={"sparse": SparseVectorParams(index=SparseIndexParams(on_disk=True))},
+            on_disk_payload=True,
         )
 
 

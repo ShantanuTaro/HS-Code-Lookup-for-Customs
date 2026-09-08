@@ -76,8 +76,13 @@ def seed(client: QdrantClient) -> int:
     of startup once vectorising was cached. The collection is dropped before a rebuild: upserts alone
     would leave points for rulings that have since been deleted from the corpus.
     """
-    stored = SEED_STAMP.read_text().strip() if SEED_STAMP.exists() else ""
     indexed = COLLECTION in {c.name for c in client.get_collections().collections}
+    # A remote index is seeded out of band by `python seed_cloud.py`, not by a web process: the
+    # corpus file is not deployed with the app, and a serverless start has neither the disk for it
+    # nor the minutes. What is already in the cluster is what gets served.
+    if QDRANT_URL and indexed:
+        return client.count(collection_name=COLLECTION).count
+    stored = SEED_STAMP.read_text().strip() if SEED_STAMP.exists() else ""
     if stored == corpus_stamp() and indexed and SITEMAP_FILE.exists():
         return client.count(collection_name=COLLECTION).count
     if indexed:
@@ -418,6 +423,8 @@ def ruling_page(number: str) -> HTMLResponse:
 @app.get("/sitemap.xml")
 def sitemap() -> FileResponse:
     """Serve the sitemap index, written to disk when the corpus was last indexed."""
+    if not SITEMAP_FILE.exists():
+        raise HTTPException(status_code=404, detail="No sitemap: this instance serves a remote index.")
     return FileResponse(SITEMAP_FILE, media_type="application/xml")
 
 

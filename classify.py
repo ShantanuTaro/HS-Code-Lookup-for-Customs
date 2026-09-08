@@ -157,9 +157,15 @@ class OpenAICompatibleChatClient:
         if not isinstance(payload, dict):
             raise ValueError("The model returned JSON that is not an object.")
         self.cache[key] = payload
-        self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-        with self.cache_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"key": key, "value": payload}) + "\n")
+        # Best effort: a hosted instance has a read-only disk, and a failed cache write must never
+        # discard an answer that has already been paid for - the caller reads that as a dead
+        # provider and falls through to the next one, or to the baseline.
+        try:
+            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.cache_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"key": key, "value": payload}) + "\n")
+        except OSError:
+            pass
         return {**payload, "_served_by": self.model}
 
 
