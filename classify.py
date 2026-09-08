@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from qdrant_client import QdrantClient
 
-from retrieve import Hit, search
+from retrieve import Hit, relevant, search
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
@@ -261,13 +261,20 @@ def gate(result: Classification) -> Classification:
     return result.model_copy(update={"disposition": "answered", "reason": f"Confidence at or above {ANSWER_CONFIDENCE_THRESHOLD:.2f} with support from {len(result.citations)} cited CBP ruling(s)."})
 
 
-def classify(description: str, *, client: QdrantClient, chat: ChatClient | None = None, top_k: int = RETRIEVAL_TOP_K) -> Classification:
+def classify(description: str, *, client: QdrantClient, chat: ChatClient | None = None, top_k: int = RETRIEVAL_TOP_K, hits: list[Hit] | None = None) -> Classification:
     """Retrieve precedent rulings, classify against them, and apply the gate to the result.
 
     A model failure degrades to the labelled retrieval baseline rather than to an error, so the
     caller always gets either an answer or a stated reason it was withheld.
     """
-    hits = search(description, top_k=top_k, client=client)
+    # `hits` is accepted so a caller that already retrieved - the streaming endpoint, which
+    # reports the candidate count before the model call - does not pay for retrieval twice.
+    if hits is None:
+        # Filtered the same way the live panel is: retrieval has no relevance floor of its own, and a
+        # ruling sharing no term with the description is not evidence - it is noise in the prompt and
+        # a puzzling row in the "rulings consulted" table. Filtering can empty the list, which is a
+        # withheld answer rather than a guess off unrelated precedent, and that is the correct outcome.
+        hits = relevant(description, search(description, top_k=top_k, client=client))
     if chat is None or not hits:
         return baseline(hits)
     try:

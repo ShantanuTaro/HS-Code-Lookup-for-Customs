@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HS Code Lookup for Customs - classification traced to CBP rulings</title>
+  <title>HS Code Lookup</title>
   <meta name="description" content="Free HS code lookup. Every classification is traced to the published CBP rulings that support it, and withheld when the rulings do not support an answer." />
   <link rel="canonical" href="{{CANONICAL}}" />
   <link rel="stylesheet" href="/static/fonts.css" />
   <link rel="stylesheet" href="/static/style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128230;</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='.7' y2='1'><stop offset='0' stop-color='%2337d7fa'/><stop offset='.4' stop-color='%234b72fe'/><stop offset='.68' stop-color='%23ff8df2'/><stop offset='1' stop-color='%23ff8705'/></linearGradient></defs><rect width='100' height='100' rx='22' fill='url(%23g)'/><text x='50' y='68' text-anchor='middle' font-family='ui-monospace,SFMono-Regular,Menlo,monospace' font-size='46' font-weight='700' fill='%23fff'>HS</text></svg>" />
 </head>
 <body>
 
@@ -55,13 +55,29 @@
       </div>
 
       <div class="suggest" id="suggest" hidden aria-live="polite">
-        <p class="suggest-head"><span class="label">Retrieval only</span><span>Press Classify for the graded answer</span></p>
+        <p class="suggest-head"><span class="label">Closest matches</span><span>Press Classify for the full answer</span></p>
         <ul id="suggest-list"></ul>
       </div>
     </form>
   </section>
 
-  <!--RESULT-->
+  <dialog class="progress" id="progress" aria-live="polite">
+    <form method="dialog" class="dismiss"><button aria-label="Close">&times;</button></form>
+    <div class="working" id="progress-working">
+      <p class="stage" id="progress-stage">Working</p>
+      <div class="bar"><span id="progress-fill"></span></div>
+      <div class="peek" id="progress-peek" hidden>
+        <div class="peek-head">
+          <span class="label">Similar products</span>
+          <span id="progress-peek-note">From the rulings being read</span>
+        </div>
+        <ul id="progress-list"></ul>
+      </div>
+    </div>
+    <div class="outcome" id="progress-outcome" tabindex="-1"></div>
+  </dialog>
+
+  <div id="answer"><!--RESULT--></div>
 </div>
 
 <section class="band" id="how">
@@ -219,8 +235,14 @@
     panel.hidden = false;
   }
 
-  // A blur closes it, after a beat so a click on one of its links still lands.
-  box.addEventListener('blur', function () { setTimeout(function () { panel.hidden = true; }, 150); });
+  // Closed by clicking away or by Escape, not by the textarea losing focus: the panel sits under
+  // the box, so a blur handler closes it on the very click that was trying to use it.
+  document.addEventListener('pointerdown', function (event) {
+    if (!panel.contains(event.target) && event.target !== box) panel.hidden = true;
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') panel.hidden = true;
+  });
   box.addEventListener('focus', function () { if (list.children.length && box.value.trim().length >= 3) panel.hidden = false; });
 
   box.addEventListener('input', function () {
@@ -235,6 +257,128 @@
         .then(render)
         .catch(function () { /* aborted or offline: leave the last panel standing */ });
     }, 250);
+  });
+
+  // Classify streams its stages instead of blocking on a page load, because the model call is a
+  // several-second wait and a dead button is indistinguishable from a broken one. The form is left
+  // as a plain GET, so with JavaScript off - or if the stream drops - the submit is a normal page
+  // load that renders the same answer. Numbers in the status line come off the wire; nothing here
+  // invents a count or fakes a percentage, and the bar is indeterminate because the model's finish
+  // time is not knowable.
+  var form = document.querySelector('.lookup');
+  var answer = document.getElementById('answer');
+  var progress = document.getElementById('progress');
+  var stageText = document.getElementById('progress-stage');
+  var working = document.getElementById('progress-working');
+  var outcome = document.getElementById('progress-outcome');
+  var fill = document.getElementById('progress-fill');
+  var peek = document.getElementById('progress-peek');
+  var peekList = document.getElementById('progress-list');
+  var peekNote = document.getElementById('progress-peek-note');
+  var stream;
+
+  function stop() {
+    if (stream) stream.close();
+    if (progress.open) progress.close();
+    form.classList.remove('busy');
+  }
+
+  // <dialog> is doing the work a hand-rolled overlay would: the top layer, the backdrop, the focus
+  // trap and Escape-to-close all come from the element. Escape abandons the wait on this end; the
+  // lookup already in flight finishes and caches server-side, so retrying it is free.
+  //
+  // Closing clears the answer rather than handing it down to the page: the window is where a result
+  // lives, and leaving a copy behind reads as the same lookup having run twice. Nothing is lost -
+  // the URL already carries ?q=, so a refresh re-renders the same answer inline.
+  progress.addEventListener('close', function () {
+    stop();
+    outcome.replaceChildren();
+    progress.classList.remove('done', 'shortlist');
+    working.hidden = false;
+  });
+
+  // The bar creeps towards 93% while the model is out and only closes the gap when the answer
+  // lands. It never reports a completion that has not happened, which is the one thing a progress
+  // bar must not do - but it also never sits still, because a frozen bar reads as a hang.
+  function advance(percent, creep) {
+    fill.classList.toggle('creep', !!creep);
+    fill.style.width = percent + '%';
+  }
+
+  form.addEventListener('submit', function (submission) {
+    var query = box.value.trim();
+    if (!window.EventSource || query.length < 12) return;   // let the plain form handle it
+    submission.preventDefault();
+    stop();
+    panel.hidden = true;
+    answer.replaceChildren();
+    form.classList.add('busy');
+    progress.classList.remove('done', 'shortlist');
+    outcome.replaceChildren();
+    working.hidden = false;
+    stageText.textContent = 'Searching the index';
+    peek.hidden = true;
+    working.append(peek);
+    peekNote.textContent = 'From the rulings being read';
+    peekList.replaceChildren();
+    advance(0, false);
+    progress.showModal();
+    requestAnimationFrame(function () { advance(14, false); });
+
+    // Sharing and refresh keep working: the answer this produces is the answer /?q= renders.
+    history.replaceState(null, '', '/?q=' + encodeURIComponent(query));
+
+    stream = new EventSource('/api/lookup/stream?q=' + encodeURIComponent(query));
+    stream.onmessage = function (message) {
+      var event = JSON.parse(message.data);
+      if (event.stage === 'search') {
+        stageText.textContent = 'Searching ' + event.scanned.toLocaleString() + ' indexed rulings';
+        advance(22, false);
+      } else if (event.stage === 'grade') {
+        var shortlist = event.candidates;
+        stageText.textContent = shortlist.length
+          ? 'Reading the ' + shortlist.length + ' closest rulings'
+          : 'No ruling matched that description';
+        advance(93, true);
+        // The neighbouring articles the retrieval turned up, each one a query in its own right:
+        // clicking one classifies it, which is the cheapest way to ask "and what about this one?".
+        peekList.replaceChildren.apply(peekList, shortlist.map(function (candidate) {
+          var li = document.createElement('li');
+          var pick = document.createElement('button');
+          pick.type = 'button';
+          var hs = document.createElement('span');
+          hs.className = 'hs';
+          hs.textContent = candidate.hs6;
+          var product = document.createElement('span');
+          product.textContent = candidate.product;
+          pick.append(hs, product);
+          pick.addEventListener('click', function () {
+            box.value = candidate.query;
+            form.requestSubmit();
+          });
+          li.append(pick);
+          return li;
+        }));
+        if (shortlist.length) { peek.hidden = false; progress.classList.add('shortlist'); }
+      } else if (event.stage === 'done') {
+        stream.close();
+        advance(100, false);
+        // The answer opens out of the same window that was doing the waiting rather than appearing
+        // somewhere else on the page. The bar is given time to reach the end before it is replaced.
+        setTimeout(function () {
+          outcome.innerHTML = event.html;
+          // The shortlist moves into the answer's own column so the window stays one section with
+          // one scrollbar, floated beside the code rather than sitting in a panel of its own.
+          working.hidden = true;
+          if (!peek.hidden) { peekNote.textContent = 'Click one to classify it';
+            outcome.prepend(peek); }
+          progress.classList.add('done');
+          outcome.focus();
+        }, 320);
+      }
+    };
+    // A dropped stream falls back to the page load rather than stranding the user on a spinner.
+    stream.onerror = function () { stop(); form.submit(); };
   });
 </script>
 </body>

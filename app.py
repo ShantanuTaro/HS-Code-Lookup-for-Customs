@@ -5,20 +5,23 @@ after JavaScript runs is not a page a crawler indexes or a broker can paste into
 lookup has a shareable `/?q=` URL that renders its own answer.
 """
 import html
+import json
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
+from starlette.concurrency import run_in_threadpool
 
-from classify import ANSWER_CONFIDENCE_THRESHOLD, Classification, classify, default_chat_client
+from classify import ANSWER_CONFIDENCE_THRESHOLD, RETRIEVAL_TOP_K, Classification, classify, default_chat_client
 from cross import RULINGS_FILE, load_rulings
-from retrieve import COLLECTION, get, index, search, tokenize
+from retrieve import COLLECTION, ENCODER_VERSION, get, index, relevant, search
 
 STATIC = Path(__file__).resolve().parent / "static"
 TEMPLATE = STATIC / "index.html"
@@ -58,10 +61,11 @@ def corpus_stamp() -> str:
     """Fingerprint the corpus file, so a rebuild is triggered by a changed file and nothing else.
 
     Size and modification time rather than a content hash: the corpus is 140MB, and reading all of
-    it to decide whether to read all of it is the cost the stamp exists to avoid.
+    it to decide whether to read all of it is the cost the stamp exists to avoid. The encoder version
+    rides along so that changing how text is vectorised also forces the rebuild it requires.
     """
     stat = RULINGS_FILE.stat()
-    return f"{stat.st_size}:{stat.st_mtime_ns}"
+    return f"v{ENCODER_VERSION}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
 def seed(client: QdrantClient) -> int:
@@ -115,6 +119,33 @@ def lookup(description: str) -> Classification:
     return classify(description.strip(), client=state["client"], chat=state["chat"])
 
 
+def product_name(subject: str) -> str:
+    """The article a ruling is about, as a shopper would say it.
+
+    CBP subject lines are all shaped "The tariff classification of X from Country", some with an
+    origin or NAFTA clause wedged in. Stripping the boilerplate leaves X, which is what the side
+    panel offers as a neighbouring product to classify.
+    """
+    prefix = r"^(the\s+)?(tariff\s+)?classification\s*,?\s*(and\s+(the\s+)?(country\s+of\s+origin|status\s+under\s+.*?)\s*,?\s*)?of\s+"
+    name = re.sub(prefix, "", subject.strip(), flags=re.I)
+    # \s* rather than \s+ after "from": the corpus carries typos like "a cloth bag fromGuatemala".
+    return re.sub(r"[,\s]+from\s*[^,]+$", "", name).strip(" .,")
+
+
+def candidate(hit) -> dict:
+    """One neighbouring article for the side panel: what to show, and what to classify if clicked.
+
+    A name too short to re-submit is still worth showing - it is the subject line behind it that
+    gets sent, so every row in the panel stays clickable.
+    """
+    product = product_name(hit.subject)[:90]
+    return {
+        "hs6": hit.hs6,
+        "product": product,
+        "query": product if len(product) >= MINIMUM_QUERY_CHARACTERS else hit.subject.strip(" .,"),
+    }
+
+
 def render_rulings(hits: list, cited: set[str]) -> str:
     """Render retrieved rulings as table rows, marking the ones the answer actually leaned on."""
     return "".join(
@@ -138,10 +169,8 @@ def render_too_short(query: str) -> str:
     retrieval rather than a model call.
     """
     hits = search(query, top_k=SUGGEST_RESULTS, client=state["client"]) if len(query) >= SUGGEST_MINIMUM_CHARACTERS else []
-    # Retrieval always returns its top_k, so the tail can be rulings sharing nothing with the query.
     # The claim below is about rulings that contain the term, so only those may be counted or shown.
-    terms = set(tokenize(query))
-    hits = [hit for hit in hits if terms & set(tokenize(f"{hit.subject} {hit.description}"))]
+    hits = relevant(query, hits)
     chapters = {hit.hs6[:2] for hit in hits}
     spread = (
         f"""<p>In the indexed rulings that term already spans {len(chapters)} different chapters.
@@ -197,8 +226,8 @@ def render_result(result: Classification) -> str:
     rows = render_rulings(result.candidates, set(result.citations))
     return f"""<section class="result">
       {headline}
-      <p class="disclaimer"><span>AI-generated</span>{DISCLAIMER}</p>
       <p class="confidence">{result.confidence:.0%}<span>Confidence</span></p>
+      <p class="disclaimer"><span>AI-generated</span>{DISCLAIMER}</p>
       <h2>Reasoning</h2>
       <p class="reasoning">{html.escape(result.reasoning)}</p>
       <h2>CBP rulings consulted</h2>
@@ -207,6 +236,11 @@ def render_result(result: Classification) -> str:
         <tbody>{rows}</tbody>
       </table>
     </section>"""
+
+
+def sse(payload: dict) -> str:
+    """One server-sent event. Kept next to the endpoint so the wire format has a single spelling."""
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 def render_page(query: str, body: str) -> str:
@@ -301,6 +335,49 @@ def home(q: str = Query(default="", max_length=MAXIMUM_QUERY_CHARACTERS)) -> HTM
     return HTMLResponse(render_page(query, render_result(lookup(query))))
 
 
+@app.get("/api/lookup/stream")
+async def lookup_stream(q: str = Query(default="", max_length=MAXIMUM_QUERY_CHARACTERS)) -> StreamingResponse:
+    """Stream a lookup as its two real stages, so the wait shows what is being waited on.
+
+    Retrieval over the local index is quick; the model call is the wait. Both numbers reported here
+    are measured rather than scripted - `scanned` is the indexed corpus and `candidates` is what
+    retrieval actually returned - because a progress bar that invents its numbers is a lie the user
+    cannot check. The final event carries the same HTML the server-rendered page would have shown,
+    so there is one renderer and `/?q=` keeps working with JavaScript off.
+    """
+    query = q.strip()
+
+    async def stages():
+        if len(query) < MINIMUM_QUERY_CHARACTERS:
+            body = render_too_short(query) if query else ""
+            yield sse({"stage": "done", "html": body})
+            return
+        yield sse({"stage": "search", "scanned": state.get("indexed", 0)})
+        # Filtered here rather than inside classify, because the count reported below has to be the
+        # shortlist the model is actually given.
+        found = await run_in_threadpool(search, query, top_k=RETRIEVAL_TOP_K, client=state["client"])
+        hits = relevant(query, found)
+        # The candidates ride along so the wait can show the codes actually under consideration
+        # rather than a decorative spinner. They are shortlisted, not answers, and the panel
+        # showing them is replaced by the graded verdict.
+        yield sse({
+            "stage": "grade",
+            "candidates": [candidate(hit) for hit in hits],
+        })
+        result = await run_in_threadpool(
+            classify, query, client=state["client"], chat=state["chat"], hits=hits
+        )
+        yield sse({"stage": "done", "html": render_result(result)})
+
+    # no-transform and X-Accel-Buffering stop a proxy from holding the stages back to deliver them
+    # as one blob, which would leave the bar frozen for the whole lookup.
+    return StreamingResponse(
+        stages(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/classify")
 def api_classify(request: LookupRequest = Body(...)) -> Classification:
     """Classify one description and return the full result, gate verdict included."""
@@ -319,7 +396,7 @@ def suggest(q: str = Query(default="", max_length=MAXIMUM_QUERY_CHARACTERS)) -> 
         return []
     return [
         {"ruling_number": hit.ruling_number, "hs6": hit.hs6, "subject": hit.subject}
-        for hit in search(query, top_k=SUGGEST_RESULTS, client=state["client"])
+        for hit in relevant(query, search(query, top_k=SUGGEST_RESULTS, client=state["client"]))
     ]
 
 

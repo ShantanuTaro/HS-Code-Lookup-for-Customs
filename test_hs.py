@@ -343,3 +343,130 @@ def test_every_result_carries_the_ai_disclaimer():
         assert "can be wrong" in page and "not customs advice" in page
         assert "licensed customs broker" in page
     app.state.clear()
+
+
+def test_lookup_stream_reports_the_stages_it_actually_ran():
+    """The status line is only worth showing if its numbers are the ones the lookup used."""
+    import json
+
+    import app
+    from fastapi.testclient import TestClient
+
+    rulings = [
+        make_ruling("N1", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags"),
+        make_ruling("N2", "0901220000", "decaf coffee", "roasted decaffeinated arabica coffee beans in retail foil bags"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+    app.state["client"] = client
+    app.state["chat"] = None          # no model configured: classify degrades to the baseline
+    app.state["indexed"] = 176940
+
+    # TestClient is used without its context manager on purpose: entering it would run the lifespan,
+    # which opens the real on-disk index.
+    http = TestClient(app.app)
+    body = http.get("/api/lookup/stream", params={"q": "roasted arabica coffee beans in 1kg retail bags"}).text
+    events = [json.loads(line[len("data: "):]) for line in body.splitlines() if line.startswith("data: ")]
+
+    assert [event["stage"] for event in events] == ["search", "grade", "done"]
+    assert events[0]["scanned"] == 176940, "the scanned count is the indexed corpus, not a decoration"
+    shortlist = events[1]["candidates"]
+    assert len(shortlist) == len(rulings), "the shortlist is what retrieval returned, not a fixed number"
+    assert {item["hs6"] for item in shortlist} == {"090121", "090122"}, "the codes shown while waiting are the retrieved ones"
+    assert 'class="result"' in events[2]["html"], "the last event carries the same HTML /?q= renders"
+
+    # Too short to classify: one event, the guidance page, and no model call behind it.
+    short = http.get("/api/lookup/stream", params={"q": "Lego"}).text
+    stages = [json.loads(line[len("data: "):])["stage"] for line in short.splitlines() if line.startswith("data: ")]
+    assert stages == ["done"]
+
+    app.state.clear()
+
+
+def test_offered_products_are_stripped_of_boilerplate_and_still_classifiable():
+    """Each row in the side panel is offered as the next query, so it has to survive being submitted."""
+    import app
+
+    assert app.product_name("The tariff classification of a stainless steel vacuum flask from China") == "a stainless steel vacuum flask"
+    assert app.product_name("Classification of used cooking oil (vegetable oil) from the Ivory Coast.") == "used cooking oil (vegetable oil)"
+    assert app.product_name("The tariff classification and country of origin of coffee, from Vietnam") == "coffee"
+
+    class Hit:
+        hs6, subject = "090111", "The tariff classification of coffee from Indonesia"
+
+    # The short name is still shown, but what gets classified on a click is long enough to submit.
+    offered = app.candidate(Hit())
+    assert offered["product"] == "coffee"
+    assert offered["query"] == Hit.subject
+    assert len(offered["query"]) >= app.MINIMUM_QUERY_CHARACTERS
+
+
+def test_suggestions_are_empty_when_nothing_in_the_corpus_matches():
+    """Retrieval has no relevance floor of its own, so a nonsense query must not look like a hit."""
+    import app
+    from fastapi.testclient import TestClient
+
+    rulings = [
+        make_ruling("N1", "0901210000", "roasted coffee", "roasted arabica coffee beans in retail bags"),
+        make_ruling("N2", "6109100012", "cotton t-shirt", "a men's t-shirt of 100% cotton jersey knit fabric"),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+    app.state["client"] = client
+
+    http = TestClient(app.app)
+    assert http.get("/api/suggest", params={"q": "coffee"}).json(), "a real term must still suggest"
+    assert http.get("/api/suggest", params={"q": "qwertyuiop"}).json() == [], "no shared term, no rows"
+
+    app.state.clear()
+
+
+def test_function_words_and_length_do_not_win_retrieval():
+    """The bug this pins: a jigsaw puzzle query retrieving a radio terminal ruling.
+
+    Nothing about the two is related - they shared only "a", "of", "for", "and" and a stray "3" -
+    but the ruling's subject runs 69 tokens against a normal 10, and raw term frequency rewards
+    saying more. Stopped tokens plus an L2-normalised vector is what stops length being relevance.
+    """
+    import app
+
+    radio = (
+        "Reconsideration of Headquarters Ruling Letter 085404, dated July 20, 1990; Mobile Radio Data "
+        "terminals; communications systems; transmission apparatus for radiotelegraphy; automatic data "
+        "processing machines and units thereof; input/output units; unfinished or incomplete goods; "
+        "Section XVI, Note 3; Chapter 84, Note 5; Chapter 84, Note 7; Additional U.S. Rule of "
+        "Interpretation 1(a); separately housed unit; Explanatory Note 84.71; principal function"
+    )
+    rulings = [
+        make_ruling("087984", "8525100000", radio, "Mobile radio data terminals and transmission apparatus for radiotelegraphy with automatic data processing units."),
+        make_ruling("805755", "9405100000", "The tariff classification of fluorescent light fixtures from Canada.", "Fluorescent light fixtures of metal for ceiling mounting."),
+        make_ruling("L84732", "9503300000", "The tariff classification of a Genius Puzzle for Kids from China.", "A children's jigsaw puzzle of printed cardboard pieces put up in a box for retail sale."),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+
+    query = "A child's wooden jigsaw puzzle of 24 printed plywood pieces in a cardboard box, for ages 3 and up."
+    hits = retrieve.search(query, top_k=3, client=client)
+    assert hits[0].ruling_number == "L84732", "the only puzzle ruling in the corpus must rank first"
+    assert [hit.ruling_number for hit in app.relevant(query, hits)] == ["L84732"], "no shared content, no row"
+
+    assert "of" not in retrieve.tokenize("of the puzzle"), "function words are dropped from both ends"
+    assert retrieve.tokenize("of the a"), "a query of nothing but function words still has to retrieve"
+
+
+def test_classify_only_sees_rulings_that_share_a_term_with_the_description():
+    """An unrelated ruling is not evidence: it is noise in the prompt and a puzzling row in the table."""
+    rulings = [
+        make_ruling("N1", "0901210000", "roasted coffee", "roasted arabica coffee beans, not decaffeinated, in retail bags"),
+        make_ruling("N2", "8525100000", "Mobile Radio Data terminals; transmission apparatus for radiotelegraphy", "Mobile radio data terminals with automatic data processing units."),
+    ]
+    client = QdrantClient(":memory:")
+    retrieve.index(client, rulings)
+
+    result = classify.classify("Roasted arabica coffee beans packed in 1kg foil bags for retail sale.", client=client)
+    assert [hit.ruling_number for hit in result.candidates] == ["N1"], "the radio ruling must not be consulted"
+
+    # Nothing matches at all: withheld off no evidence, rather than a guess off unrelated precedent.
+    nothing = classify.classify("Zirconium sputtering targets for semiconductor deposition.", client=client)
+    assert nothing.candidates == [] and nothing.disposition == "escalated"
+    assert nothing.hs6 is None, "no candidates must never produce a code"

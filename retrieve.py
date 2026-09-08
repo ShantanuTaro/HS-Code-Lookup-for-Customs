@@ -22,8 +22,24 @@ COLLECTION = "cross_rulings"
 DENSE_DIMENSIONS = 384
 SPARSE_VOCABULARY_SIZE = 65_536
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+# Function words carry no classification signal, but in a raw term-frequency vector they are the
+# loudest thing in a long document: a ruling whose subject runs 69 tokens scores on "of", "and" and
+# "for" against every query in the corpus, which is how a jigsaw puzzle retrieves a radio terminal.
+# Single characters go with them - "a", the "s" left by an apostrophe, a bare digit out of "ages 3".
+STOPWORDS = frozenset(
+    "about above after all also an and any are as at be been before being below between both but by "
+    "can could did do does doing during each few for from further had has have having he her here "
+    "him his how if in into is it its me more most my no nor of off on once only or other our out "
+    "over own same she should so some such than that the their them then there these they this those "
+    "through to too under until up us very was we were what when where which while who whom why will "
+    "with would you your".split()
+)
 MINIMUM_PREFETCH = 40
 RERANK_CANDIDATES = 40
+# Bumped whenever tokenizing or either encoder changes, because vectors written by an older version
+# are not comparable with vectors built by this one. The seed stamp carries it, so a stale index
+# rebuilds itself instead of silently answering with the old representation.
+ENCODER_VERSION = 2
 
 
 class Hit(BaseModel):
@@ -41,7 +57,33 @@ class Hit(BaseModel):
 
 def tokenize(text: str) -> list[str]:
     """Normalize text into stable alphanumeric tokens shared by both representations."""
-    return TOKEN_PATTERN.findall(text.lower())
+    found = TOKEN_PATTERN.findall(text.lower())
+    kept = [token for token in found if len(token) > 1 and token not in STOPWORDS]
+    # A query that is nothing but function words still has to retrieve something rather than send an
+    # empty vector to Qdrant, so the stoplist yields rather than empties the query.
+    return kept or found
+
+
+def relevant(query: str, hits: list["Hit"]) -> list["Hit"]:
+    """Drop hits that share no term with the query.
+
+    Retrieval has no relevance floor: `search` returns its top_k whether or not anything is close,
+    so a query the corpus knows nothing about still comes back with the least-bad five. Requiring
+    one shared token is a floor the user can verify by eye - the word they typed is in the row -
+    and it is cheap, because the fused score itself cannot distinguish a weak match from no match.
+    """
+    terms = tokenize(query)
+    if not terms:
+        return []
+    # The last token is usually half-typed in the live panel, so it matches as a prefix: "jigs"
+    # keeps the jigsaw rulings on screen instead of blanking the panel until the word is finished.
+    exact, typing = set(terms), terms[-1]
+    kept = []
+    for hit in hits:
+        tokens = set(tokenize(f"{hit.subject} {hit.description}"))
+        if exact & tokens or any(token.startswith(typing) for token in tokens):
+            kept.append(hit)
+    return kept
 
 
 def dense_vector(text: str, dimensions: int = DENSE_DIMENSIONS) -> list[float]:
@@ -58,9 +100,14 @@ def sparse_vector(text: str) -> SparseVector:
     """Build a deterministic term-frequency sparse vector for Qdrant named sparse search."""
     counts: Counter[int] = Counter()
     for token, count in Counter(tokenize(text)).items():
-        counts[int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:4], "big") % SPARSE_VOCABULARY_SIZE] += count
+        # Sublinear term frequency: the tenth mention of "cotton" says much less than the first, and
+        # raw counts let one repetitive ruling outscore an exactly-on-point one.
+        counts[int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:4], "big") % SPARSE_VOCABULARY_SIZE] += 1.0 + math.log(count)
+    # L2 normalised so a long ruling does not outrank a short one on length alone. Without this the
+    # dot product rewards saying more, which in a corpus of legal prose is not the same as matching.
+    magnitude = math.sqrt(sum(value * value for value in counts.values())) or 1.0
     indices = sorted(counts)
-    return SparseVector(indices=indices, values=[float(counts[index]) for index in indices])
+    return SparseVector(indices=indices, values=[counts[index] / magnitude for index in indices])
 
 
 def document_text(ruling: Ruling) -> str:
